@@ -1,0 +1,56 @@
+name: Deploy Eagles Server to Hostinger VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync files and deploy container
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          INGEST_API_KEY: ${{ secrets.INGEST_API_KEY }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${VPS_USER}@${VPS_HOST}" "mkdir -p /root/apps/eagles-server"
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.env' \
+            -e "ssh -i ~/.ssh/id_ed25519" \
+            ./ "${VPS_USER}@${VPS_HOST}:/root/apps/eagles-server/"
+
+          ssh -i ~/.ssh/id_ed25519 "${VPS_USER}@${VPS_HOST}" bash -s <<EOF
+            set -euo pipefail
+            cd /root/apps/eagles-server
+            if [ -n "${INGEST_API_KEY}" ]; then
+              printf 'INGEST_API_KEY=%s\n' "${INGEST_API_KEY}" > .env
+            fi
+            docker compose up -d --build
+            docker compose ps
+          EOF

@@ -1,0 +1,10 @@
+{
+  "name": "marathon-tracker-backend",
+  "version": "1.0.0",
+  "description": "Backend API, GPX route-snapping engine, and mobile map UI for marathon runner tracking",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/gpx-matcher.test.js"
+  }
+}
