@@ -12,6 +12,7 @@ services:
       ADMIN_SETUP_TOKEN: ${ADMIN_SETUP_TOKEN:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
       PASSKEY_STORE_FILE: ${PASSKEY_STORE_FILE:-/app/auth/passkeys.json}
+      MAPS_DIR: ${MAPS_DIR:-/app/maps}
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
       WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://eaglesrunclub.com,https://www.eaglesrunclub.com,https://eagles.boomhut.dev}
@@ -19,6 +20,7 @@ services:
     volumes:
       - ./data:/app/data:ro
       - ./auth:/app/auth
+      - ./maps:/app/maps
     expose:
       - "3000"
     networks:

@@ -4,7 +4,7 @@ import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadRoute } from './gpx-matcher.js';
+import { MapManager } from './maps.js';
 import { PasskeyManager } from './passkeys.js';
 import { RunnerStore } from './store.js';
 import { ScraperController } from './scraper-control.js';
@@ -36,6 +36,7 @@ const ADMIN_PASSWORD =
 const ADMIN_SETUP_TOKEN = process.env.ADMIN_SETUP_TOKEN || '';
 const PASSKEY_STORE_FILE =
   process.env.PASSKEY_STORE_FILE || path.resolve(__dirname, '../auth/passkeys.json');
+const MAPS_DIR = process.env.MAPS_DIR || path.resolve(__dirname, '../maps');
 const WEBAUTHN_RP_ID = process.env.WEBAUTHN_RP_ID || '';
 const WEBAUTHN_ORIGIN = (process.env.WEBAUTHN_ORIGIN || '')
   .split(',')
@@ -68,8 +69,8 @@ const MIME_TYPES = {
   '.png': 'image/png',
 };
 
-const route = loadRoute(ROUTE_FILE);
-const store = new RunnerStore(route);
+const mapManager = new MapManager({ mapsDir: MAPS_DIR, defaultRouteFile: ROUTE_FILE });
+const store = new RunnerStore(mapManager);
 const scraperControl = new ScraperController();
 const passkeys = new PasskeyManager({
   storeFile: PASSKEY_STORE_FILE,
@@ -112,7 +113,7 @@ function readJsonBody(req) {
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > 1_000_000) {
+      if (raw.length > 5_000_000) {
         reject(new Error('Payload too large'));
       }
     });
@@ -134,6 +135,8 @@ function serveStatic(req, reqPath, res) {
     safePath = '/index.html';
   } else if (safePath === '/devices' || safePath === '/devices/') {
     safePath = '/devices.html';
+  } else if (safePath === '/map' || safePath === '/map/') {
+    safePath = '/map.html';
   } else if (safePath === '/login' || safePath === '/login/') {
     safePath = '/login.html';
   }
@@ -255,12 +258,16 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Public login screen + PWA manifest
+  // Public login screen, brand icon + PWA manifest
   if (
     req.method === 'GET' &&
-    (url.pathname === '/login' || url.pathname === '/login/' || url.pathname === '/manifest.json')
+    (url.pathname === '/login' ||
+      url.pathname === '/login/' ||
+      url.pathname === '/manifest.json' ||
+      url.pathname === '/eagles-icon.png' ||
+      url.pathname === '/favicon.ico')
   ) {
-    return serveStatic(req, url.pathname, res);
+    return serveStatic(req, url.pathname === '/favicon.ico' ? '/eagles-icon.png' : url.pathname, res);
   }
 
   // Web session login (rate-limited)
@@ -451,28 +458,118 @@ const server = http.createServer(async (req, res) => {
     if (!canReadAppApi(req, url.pathname)) {
       return sendJson(req, res, 401, { error: 'Unauthorized' });
     }
+    const primary = mapManager.getPrimaryMap();
     return sendJson(req, res, 200, {
       ok: true,
-      route: route.name,
-      totalKm: Number((route.totalMeters / 1000).toFixed(2)),
+      route: primary.name,
+      totalKm: Number((primary.totalMeters / 1000).toFixed(2)),
+      openMapCount: mapManager.getOpenMaps().length,
       runnerCount: store.runners.size,
       scraper: scraperControl.getStatus(),
     });
   }
 
-  // Full marathon route geometry (App-to-App signed token or Web session)
+  // Full marathon route geometry + all open maps (App-to-App signed token or Web session)
   if (req.method === 'GET' && url.pathname === '/api/route') {
     if (!canReadAppApi(req, url.pathname)) {
       return sendJson(req, res, 401, { error: 'Unauthorized' });
     }
+    return sendJson(req, res, 200, mapManager.getPublicRoutePayload());
+  }
+
+  // Map management: list all maps, open maps, and device assignments
+  if (req.method === 'GET' && url.pathname === '/api/maps') {
+    if (!canReadAppApi(req, url.pathname)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
     return sendJson(req, res, 200, {
-      name: route.name,
-      city: route.city,
-      totalMeters: Math.round(route.totalMeters),
-      totalKm: Number((route.totalMeters / 1000).toFixed(2)),
-      points: route.points,
-      cumulativeMeters: route.cumulativeMeters.map((m) => Math.round(m)),
+      ...mapManager.getState(),
+      knownDevices: scraperControl.knownDevices,
     });
+  }
+
+  // Map management: add a new map (GPX or JSON)
+  if (req.method === 'POST' && url.pathname === '/api/maps') {
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    try {
+      const body = await readJsonBody(req);
+      const created = mapManager.addMap({
+        name: body.name,
+        distanceLabel: body.distanceLabel,
+        city: body.city,
+        color: body.color,
+        gpx: body.gpx,
+        json: body.json,
+        open: body.open !== false,
+        setPrimary: Boolean(body.setPrimary),
+      });
+      store.recomputeAll();
+      return sendJson(req, res, 201, { ok: true, map: created, state: mapManager.getState() });
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
+  }
+
+  // Map management: change current primary map
+  if (req.method === 'POST' && url.pathname === '/api/maps/select') {
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    try {
+      const body = await readJsonBody(req);
+      const state = mapManager.setPrimaryMap(body.mapId);
+      store.recomputeAll();
+      return sendJson(req, res, 200, { ok: true, ...state });
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
+  }
+
+  // Map management: toggle a map open/closed (supports multiple open maps e.g. 5k, 10k, 21k)
+  if (req.method === 'POST' && url.pathname === '/api/maps/open') {
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    try {
+      const body = await readJsonBody(req);
+      const state = mapManager.setMapOpen(body.mapId, Boolean(body.open));
+      store.recomputeAll();
+      return sendJson(req, res, 200, { ok: true, ...state });
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
+  }
+
+  // Map management: assign a device/runner to a specific open map (or null for default)
+  if (req.method === 'POST' && url.pathname === '/api/maps/assign') {
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    try {
+      const body = await readJsonBody(req);
+      const state = mapManager.assignDevice(body.runnerId, body.mapId || null);
+      store.recomputeAll();
+      return sendJson(req, res, 200, { ok: true, ...state });
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
+  }
+
+  // Map management: delete a map
+  if (req.method === 'POST' && url.pathname === '/api/maps/delete') {
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    try {
+      const body = await readJsonBody(req);
+      const state = mapManager.deleteMap(body.mapId);
+      store.recomputeAll();
+      return sendJson(req, res, 200, { ok: true, ...state });
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
   }
 
   // Snapshot of all runners (App-to-App signed token or Web session)
@@ -645,6 +742,12 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const pings = Array.isArray(body) ? body : Array.isArray(body.pings) ? body.pings : [body];
       const results = pings.map((p) => {
+        if (p?.runnerId && (p.batteryPct !== undefined || p.batteryStatus !== undefined)) {
+          scraperControl.updateDeviceBattery(p.runnerId, {
+            batteryPct: p.batteryPct,
+            batteryStatus: p.batteryStatus,
+          });
+        }
         const customName = scraperControl.getDisplayName(p?.runnerId, p?.name);
         return store.ingestPing(customName ? { ...p, name: customName } : p);
       });
@@ -661,6 +764,8 @@ const server = http.createServer(async (req, res) => {
         url.pathname === '/' ||
         url.pathname === '/devices' ||
         url.pathname === '/devices/' ||
+        url.pathname === '/map' ||
+        url.pathname === '/map/' ||
         url.pathname.endsWith('.html');
       if (isPage) {
         return redirectToLogin(req, res, url.pathname + url.search);
@@ -712,9 +817,10 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(PORT, HOST, () => {
+  const primary = mapManager.getPrimaryMap();
   console.log(`Marathon Tracker backend running at http://localhost:${PORT}`);
   console.log(
-    `Loaded route: ${route.name} (${(route.totalMeters / 1000).toFixed(2)} km, ${route.points.length} waypoints)`
+    `Loaded primary route: ${primary.name} (${(primary.totalMeters / 1000).toFixed(2)} km, ${primary.points.length} waypoints; ${mapManager.getOpenMaps().length} open map(s))`
   );
   if (!API_KEY) console.warn('WARNING: INGEST_API_KEY is not set.');
   if (!APP_API_TOKEN) console.warn('WARNING: APP_API_TOKEN is not set (mobile app API calls will be rejected).');

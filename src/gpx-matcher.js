@@ -19,15 +19,19 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
 }
 
 /**
- * Parse a standard GPX file (<trkpt lat="..." lon="...">) into [[lat, lon], ...].
+ * Parse a standard GPX file (<trkpt> or <rtept>) into [[lat, lon], ...].
  */
 export function parseGpx(xmlText) {
   const points = [];
-  const regex = /<trkpt\b[^>]*\blat="([^"]+)"[^>]*\blon="([^"]+)"/gi;
+  const tagRegex = /<(?:trkpt|rtept)\b([^>]*)>/gi;
   let match;
-  while ((match = regex.exec(xmlText)) !== null) {
-    const lat = Number.parseFloat(match[1]);
-    const lon = Number.parseFloat(match[2]);
+  while ((match = tagRegex.exec(xmlText)) !== null) {
+    const attrs = match[1];
+    const latMatch = attrs.match(/\blat="([^"]+)"/i);
+    const lonMatch = attrs.match(/\blon="([^"]+)"/i);
+    if (!latMatch || !lonMatch) continue;
+    const lat = Number.parseFloat(latMatch[1]);
+    const lon = Number.parseFloat(lonMatch[1]);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
       points.push([lat, lon]);
     }

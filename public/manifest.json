@@ -1,8 +1,16 @@
 {
-  "name": "Eagles Run Club Tracker",
+  "name": "Eagles Run Club",
   "short_name": "EaglesRun",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a"
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    {
+      "src": "/eagles-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }

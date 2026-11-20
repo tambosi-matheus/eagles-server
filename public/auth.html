@@ -3,8 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#0A0A0A" />
     <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/eagles-icon.png" />
+    <link rel="apple-touch-icon" href="/eagles-icon.png" />
     <title>Google Sign-In · Eagles Run Club</title>
     <link rel="stylesheet" href="/devices.css" />
     <style>
@@ -19,19 +21,21 @@
         flex: 1;
         width: 100%;
         border: none;
-        background: #0f172a;
+        background: #0a0a0a;
       }
     </style>
   </head>
   <body>
     <header class="topbar">
       <div class="topbar-title">
+        <img src="/eagles-icon.png" alt="Eagles Run Club" style="width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;" />
         <span>Google Sign-In</span>
         <span id="auth-badge" class="badge badge-connecting">Checking…</span>
       </div>
       <div class="topbar-actions">
         <nav class="topbar-nav" aria-label="Primary">
-          <a href="/" class="icon-btn">Map</a>
+          <a href="/" class="icon-btn">Live</a>
+          <a href="/map" class="icon-btn">Maps</a>
           <a href="/devices" class="icon-btn">Devices</a>
           <a href="/auth" class="icon-btn active" aria-current="page">Auth</a>
         </nav>

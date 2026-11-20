@@ -76,6 +76,29 @@ function formatIntervalLabel(seconds) {
   return `${seconds} sec`;
 }
 
+function renderBatteryBadge(device) {
+  const hasPct = device.batteryPct !== null && device.batteryPct !== undefined && Number.isFinite(Number(device.batteryPct));
+  const status = device.batteryStatus || null;
+
+  if (hasPct) {
+    const pct = Math.round(Number(device.batteryPct));
+    const levelClass = pct <= 15 ? 'battery-critical' : pct <= 30 ? 'battery-low' : 'battery-ok';
+    return `<span class="battery-pill ${levelClass}" title="Battery level">${pct}%</span>`;
+  }
+
+  if (status === 'critical') {
+    return '<span class="battery-pill battery-critical" title="Battery critical">Battery Critical</span>';
+  }
+  if (status === 'low') {
+    return '<span class="battery-pill battery-low" title="Low battery">Low Battery</span>';
+  }
+  if (status === 'ok') {
+    return '<span class="battery-pill battery-ok" title="Battery OK">Battery OK</span>';
+  }
+
+  return '<span class="battery-pill battery-unknown" title="Battery not reported yet">Battery --</span>';
+}
+
 function renderIntervalSelect(device) {
   const current = Number(device.pollIntervalSeconds) || 30;
   const options = [...INTERVAL_OPTIONS];
@@ -185,7 +208,10 @@ function render() {
           </div>
           <div class="device-info">
             ${titleBlock}
-            <div class="device-meta">${escapeHtml(device.deviceName)}</div>
+            <div class="device-meta-row">
+              <span class="device-meta">${escapeHtml(device.deviceName)}</span>
+              ${renderBatteryBadge(device)}
+            </div>
             ${renderIntervalSelect(device)}
           </div>
           <label class="switch" aria-label="Toggle tracking for ${escapeHtml(device.name)}">

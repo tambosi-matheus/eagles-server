@@ -5,10 +5,50 @@ const MAX_EXTRAPOLATION_SECONDS = 600; // Stop extrapolating if no ping for > 10
 const MAX_HISTORY_POINTS = 50;
 
 export class RunnerStore {
-  constructor(route) {
-    this.route = route;
+  constructor(routeOrManager) {
+    if (routeOrManager && typeof routeOrManager.getPrimaryMap === 'function') {
+      this.mapManager = routeOrManager;
+      this.route = routeOrManager.getPrimaryMap();
+    } else {
+      this.mapManager = null;
+      this.route = routeOrManager;
+    }
     this.runners = new Map();
     this.listeners = new Set();
+  }
+
+  getRouteForRunner(runnerId) {
+    if (this.mapManager) {
+      return this.mapManager.getRouteForRunner(runnerId);
+    }
+    return this.route;
+  }
+
+  getPrimaryRoute() {
+    if (this.mapManager) {
+      return this.mapManager.getPrimaryMap();
+    }
+    return this.route;
+  }
+
+  /**
+   * Re-snap all runners with known raw GPS locations after map changes or device reassignment.
+   */
+  recomputeAll() {
+    this.route = this.getPrimaryRoute();
+    for (const record of this.runners.values()) {
+      if (record.hasLocation === false || !Number.isFinite(record.rawLat) || !Number.isFinite(record.rawLon)) {
+        continue;
+      }
+      const runnerRoute = this.getRouteForRunner(record.runnerId);
+      const snapped = snapToRoute(runnerRoute, record.rawLat, record.rawLon);
+      record.snappedLat = snapped.lat;
+      record.snappedLon = snapped.lon;
+      record.distanceMeters = snapped.distanceMeters;
+      record.crossTrackMeters = Math.round(snapped.crossTrackMeters);
+      record.onCourse = snapped.onCourse;
+    }
+    this.broadcast('snapshot', this.getSnapshot());
   }
 
   subscribe(fn) {
@@ -121,7 +161,8 @@ export class RunnerStore {
         ? (pingMs - existing.lastPingAt) / 1000
         : null;
 
-    const snapped = snapToRoute(this.route, lat, lon, {
+    const runnerRoute = this.getRouteForRunner(runnerId);
+    const snapped = snapToRoute(runnerRoute, lat, lon, {
       lastDistanceMeters: existing?.onCourse ? existing.distanceMeters : null,
       elapsedSeconds: elapsedSec,
     });
@@ -197,12 +238,22 @@ export class RunnerStore {
   }
 
   _toPublicView(record, nowMs) {
+    const runnerRoute = this.getRouteForRunner(record.runnerId);
+    const mapMeta = {
+      mapId: runnerRoute?.id || null,
+      mapName: runnerRoute?.name || null,
+      mapDistanceLabel: runnerRoute?.distanceLabel || null,
+      mapColor: runnerRoute?.color || null,
+      mapTotalKm: runnerRoute ? Number((runnerRoute.totalMeters / 1000).toFixed(2)) : null,
+    };
+
     if (record.hasLocation === false) {
       return {
         runnerId: record.runnerId,
         name: record.name,
         bib: record.bib,
         color: record.color,
+        ...mapMeta,
         hasLocation: false,
         source: null,
         rawLat: null,
@@ -237,20 +288,20 @@ export class RunnerStore {
       record.speedMps &&
       ageSeconds > 1 &&
       ageSeconds <= MAX_EXTRAPOLATION_SECONDS &&
-      record.distanceMeters < this.route.totalMeters
+      record.distanceMeters < runnerRoute.totalMeters
     ) {
       estimatedDistanceMeters = Math.min(
-        this.route.totalMeters,
+        runnerRoute.totalMeters,
         record.distanceMeters + record.speedMps * ageSeconds
       );
-      const pt = pointAtDistance(this.route, estimatedDistanceMeters);
+      const pt = pointAtDistance(runnerRoute, estimatedDistanceMeters);
       displayLat = pt.lat;
       displayLon = pt.lon;
       interpolated = true;
     }
 
     const paceSecPerKm = record.speedMps ? Math.round(1000 / record.speedMps) : null;
-    const remainingMeters = Math.max(0, this.route.totalMeters - estimatedDistanceMeters);
+    const remainingMeters = Math.max(0, runnerRoute.totalMeters - estimatedDistanceMeters);
     const etaSeconds =
       record.speedMps && remainingMeters > 0 ? Math.round(remainingMeters / record.speedMps) : null;
 
@@ -259,6 +310,7 @@ export class RunnerStore {
       name: record.name,
       bib: record.bib,
       color: record.color,
+      ...mapMeta,
       hasLocation: true,
       source: record.source,
       rawLat: record.rawLat,
@@ -274,7 +326,7 @@ export class RunnerStore {
       distanceKm: Number((estimatedDistanceMeters / 1000).toFixed(2)),
       lastVerifiedKm: Number((record.distanceMeters / 1000).toFixed(2)),
       progressPct: Number(
-        Math.min(100, (estimatedDistanceMeters / this.route.totalMeters) * 100).toFixed(1)
+        Math.min(100, (estimatedDistanceMeters / runnerRoute.totalMeters) * 100).toFixed(1)
       ),
       speedMps: record.speedMps ? Number(record.speedMps.toFixed(2)) : null,
       paceSecPerKm,
@@ -285,6 +337,7 @@ export class RunnerStore {
   }
 
   getSnapshot(nowMs = Date.now()) {
+    const primaryRoute = this.getPrimaryRoute();
     const runners = [];
     for (const record of this.runners.values()) {
       runners.push(this._toPublicView(record, nowMs));
@@ -299,10 +352,22 @@ export class RunnerStore {
     return {
       serverTime: nowMs,
       route: {
-        name: this.route.name,
-        city: this.route.city,
-        totalKm: Number((this.route.totalMeters / 1000).toFixed(2)),
+        id: primaryRoute.id || null,
+        name: primaryRoute.name,
+        distanceLabel: primaryRoute.distanceLabel || null,
+        city: primaryRoute.city,
+        totalKm: Number((primaryRoute.totalMeters / 1000).toFixed(2)),
       },
+      openMaps: this.mapManager
+        ? this.mapManager.getOpenMaps().map((m) => ({
+            id: m.id,
+            name: m.name,
+            distanceLabel: m.distanceLabel,
+            color: m.color,
+            totalKm: Number((m.totalMeters / 1000).toFixed(2)),
+            isPrimary: m.id === this.mapManager.primaryMapId,
+          }))
+        : undefined,
       runners,
     };
   }

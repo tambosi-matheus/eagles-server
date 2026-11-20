@@ -235,15 +235,27 @@ function renderRunnerList() {
 async function initRoute() {
   const res = await fetch('/api/route');
   const route = await res.json();
-  routeNameEl.textContent = `${route.name} (${route.totalKm} km)`;
+  const openMaps = Array.isArray(route.openMaps) && route.openMaps.length > 0 ? route.openMaps : [route];
 
-  routeLayer = L.polyline(route.points, {
-    color: '#38bdf8',
-    weight: 5,
-    opacity: 0.85,
-  }).addTo(map);
+  if (openMaps.length > 1) {
+    routeNameEl.textContent = `${openMaps.map((m) => m.distanceLabel || `${m.totalKm}k`).join(' · ')} (${openMaps.length} maps)`;
+  } else {
+    routeNameEl.textContent = `${route.name} (${route.totalKm} km)`;
+  }
 
-  // Add start/finish marker and km markers every 2 km
+  const group = L.featureGroup();
+  for (const m of openMaps) {
+    if (!Array.isArray(m.points) || m.points.length < 2) continue;
+    const line = L.polyline(m.points, {
+      color: m.color || '#ff4d00',
+      weight: m.isPrimary ? 5 : 4,
+      opacity: m.isPrimary ? 0.9 : 0.78,
+    }).bindTooltip(`${m.name} (${m.distanceLabel || `${m.totalKm}k`})`, { sticky: true });
+    line.addTo(group);
+  }
+  routeLayer = group.addTo(map);
+
+  // Add start marker on primary route
   if (route.points.length > 0) {
     const startIcon = L.divIcon({
       className: '',

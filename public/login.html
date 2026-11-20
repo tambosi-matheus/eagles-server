@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0A0A0A" />
     <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/eagles-icon.png" />
+    <link rel="apple-touch-icon" href="/eagles-icon.png" />
     <title>Admin Sign In · Eagles Run Club</title>
     <style>
       * {
@@ -190,8 +192,13 @@
   <body>
     <main class="card">
       <div class="brand">
-        <span class="kicker">Eagles Run Club</span>
-        <h1 id="page-title">ADMIN SIGN IN</h1>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <img src="/eagles-icon.png" alt="Eagles Run Club" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;" />
+          <div>
+            <span class="kicker">Eagles Run Club</span>
+            <h1 id="page-title">ADMIN SIGN IN</h1>
+          </div>
+        </div>
         <p id="page-subtitle" class="subtitle">
           Choose Fingerprint / FaceID or your access code to continue.
         </p>

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0A0A0A" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/eagles-icon.png" />
+    <link rel="apple-touch-icon" href="/eagles-icon.png" />
+    <title>Map Management · Eagles Run Club</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="/map.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-title">
+        <img src="/eagles-icon.png" alt="Eagles Run Club" style="width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;" />
+        <span>Map Management</span>
+        <span id="open-count-badge" class="badge">0 Open</span>
+      </div>
+      <div class="topbar-actions">
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="/" class="icon-btn">Live</a>
+          <a href="/map" class="icon-btn active" aria-current="page">Maps</a>
+          <a href="/devices" class="icon-btn">Devices</a>
+          <a href="/auth" class="icon-btn">Auth</a>
+        </nav>
+        <button id="btn-logout" class="icon-btn" type="button">Sign Out</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <div id="alert-box" class="alert hidden" role="alert"></div>
+
+      <!-- Interactive Preview of All Open Maps -->
+      <section class="panel preview-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Open Maps Preview</h2>
+            <p class="muted">All currently open distance maps (e.g. 5k, 10k, 21k) rendered together.</p>
+          </div>
+          <button id="btn-fit-preview" class="btn btn-secondary" type="button">Fit All Open</button>
+        </div>
+        <div id="preview-map" class="preview-map"></div>
+      </section>
+
+      <div class="columns">
+        <!-- Left: Saved Maps Library -->
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Saved Maps</h2>
+              <p class="muted">Toggle multiple maps Open for the same race, or set the Default map.</p>
+            </div>
+          </div>
+          <div id="maps-list" class="stack">
+            <div class="empty-state">Loading maps…</div>
+          </div>
+        </section>
+
+        <!-- Right: Device Assignments + Upload New Map -->
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Device Distance Assignment</h2>
+                <p class="muted">Assign each tracked device to a specific open map (5k, 10k, 21k…) or Default.</p>
+              </div>
+            </div>
+            <div id="devices-list" class="stack">
+              <div class="empty-state">Loading devices…</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Add New Map</h2>
+                <p class="muted">Upload a <code>.gpx</code> or <code>.json</code> / GeoJSON route file.</p>
+              </div>
+            </div>
+            <form id="upload-form" class="form-grid">
+              <label>
+                Map Name
+                <input id="map-name" type="text" placeholder="e.g. Curitiba Night Run 10K" required />
+              </label>
+
+              <div class="row-2">
+                <label>
+                  Distance Tag
+                  <input id="map-distance" type="text" placeholder="e.g. 5k, 10k, 21k" />
+                </label>
+                <label>
+                  Route Color
+                  <input id="map-color" type="color" value="#38bdf8" />
+                </label>
+              </div>
+
+              <label>
+                City (optional)
+                <input id="map-city" type="text" placeholder="e.g. Curitiba" />
+              </label>
+
+              <label>
+                GPX or JSON Route File
+                <input id="map-file" type="file" accept=".gpx,.json,.geojson,application/gpx+xml,application/json" required />
+              </label>
+
+              <div class="checks-row">
+                <label class="checkbox-label">
+                  <input id="map-open" type="checkbox" checked />
+                  <span>Open immediately</span>
+                </label>
+                <label class="checkbox-label">
+                  <input id="map-primary" type="checkbox" />
+                  <span>Set as Default map</span>
+                </label>
+              </div>
+
+              <button id="btn-upload" class="btn btn-primary" type="submit">Add Map to Server</button>
+            </form>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="/map.js"></script>
+  </body>
+</html>

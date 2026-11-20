@@ -5,13 +5,13 @@
 }
 
 :root {
-  --bg: #0f172a;
-  --panel: rgba(15, 23, 42, 0.94);
-  --card: #1e293b;
-  --border: rgba(148, 163, 184, 0.2);
-  --text: #f8fafc;
-  --muted: #94a3b8;
-  --accent: #38bdf8;
+  --bg: #0a0a0a;
+  --panel: rgba(10, 10, 10, 0.94);
+  --card: #1c1c1c;
+  --border: #2a2a2a;
+  --text: #ffffff;
+  --muted: #a3a3a3;
+  --accent: #ff4d00;
   --ok: #22c55e;
   --warn: #f59e0b;
 }
@@ -104,8 +104,10 @@ body {
 }
 
 .icon-btn.active {
+  background: var(--accent);
   border-color: var(--accent);
-  color: var(--accent);
+  color: #0a0a0a;
+  font-weight: 800;
 }
 
 #map {
@@ -181,7 +183,7 @@ body {
 
 .runner-card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 0 1px rgba(255, 77, 0, 0.4);
 }
 
 .runner-dot {
@@ -192,7 +194,7 @@ body {
   place-items: center;
   font-weight: 700;
   font-size: 13px;
-  color: #0f172a;
+  color: #0a0a0a;
 }
 
 .runner-main {
@@ -250,16 +252,16 @@ body {
   border-radius: 999px;
   font-weight: 700;
   font-size: 12px;
-  color: #0f172a;
+  color: #0a0a0a;
   border: 2px solid #ffffff;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
   white-space: nowrap;
 }
 
 .km-marker {
-  background: #0f172a;
-  color: #e2e8f0;
-  border: 1px solid #38bdf8;
+  background: #0a0a0a;
+  color: #ffffff;
+  border: 1px solid #ff4d00;
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;

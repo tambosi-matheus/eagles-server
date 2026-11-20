@@ -6,8 +6,10 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#0A0A0A" />
     <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/eagles-icon.png" />
+    <link rel="apple-touch-icon" href="/eagles-icon.png" />
     <title>Eagles Run Club · Live Tracker</title>
     <link
       rel="stylesheet"
@@ -20,12 +22,14 @@
   <body>
     <header class="topbar">
       <div class="topbar-title">
+        <img src="/eagles-icon.png" alt="Eagles Run Club" style="width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;" />
         <span id="route-name">Loading route…</span>
         <span id="connection-badge" class="badge badge-connecting">Connecting</span>
       </div>
       <div class="topbar-actions">
         <nav class="topbar-nav" aria-label="Primary">
-          <a href="/" class="icon-btn active" aria-current="page">Map</a>
+          <a href="/" class="icon-btn active" aria-current="page">Live</a>
+          <a href="/map" class="icon-btn">Maps</a>
           <a href="/devices" class="icon-btn">Devices</a>
           <a href="/auth" class="icon-btn">Auth</a>
         </nav>

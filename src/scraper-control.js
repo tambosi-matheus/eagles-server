@@ -52,6 +52,7 @@ export class ScraperController {
     this.knownDevices = [];
     this.customNames = new Map();
     this.deviceIntervals = new Map(); // runnerId -> pollIntervalSeconds
+    this.deviceBatteries = new Map(); // runnerId -> { batteryPct, batteryStatus, updatedAt }
     this.auth = {
       authenticated: null, // null = unknown/not yet reported, true = signed in, false = needs login
       reason: null,
@@ -86,6 +87,7 @@ export class ScraperController {
             ? Math.round(Number(d.pollIntervalSeconds))
             : 30;
         const interval = this.deviceIntervals.get(runnerId) ?? defaultInterval;
+        const battery = this.deviceBatteries.get(runnerId) || null;
         return {
           runnerId,
           deviceName: String(d.deviceName || d.runnerId || d.name).trim(),
@@ -93,6 +95,9 @@ export class ScraperController {
           bib: d.bib ? String(d.bib).trim() : '',
           color: typeof d.color === 'string' && d.color.trim() ? d.color.trim() : '#38bdf8',
           pollIntervalSeconds: interval,
+          batteryPct: battery?.batteryPct ?? null,
+          batteryStatus: battery?.batteryStatus ?? null,
+          batteryUpdatedAt: battery?.updatedAt ?? null,
         };
       });
     return this.knownDevices;
@@ -141,6 +146,43 @@ export class ScraperController {
       deviceIntervals,
       knownDevices: this.knownDevices,
     };
+  }
+
+  updateDeviceBattery(runnerId, { batteryPct = null, batteryStatus = null } = {}) {
+    const id = String(runnerId || '').trim();
+    if (!id) return null;
+
+    const pct =
+      batteryPct !== null && batteryPct !== undefined && Number.isFinite(Number(batteryPct))
+        ? Math.max(0, Math.min(100, Math.round(Number(batteryPct))))
+        : null;
+    const rawStatus = typeof batteryStatus === 'string' ? batteryStatus.trim().toLowerCase() : '';
+    const validStatus = ['ok', 'low', 'critical'].includes(rawStatus)
+      ? rawStatus
+      : pct !== null
+        ? pct <= 15
+          ? 'critical'
+          : pct <= 30
+            ? 'low'
+            : 'ok'
+        : null;
+
+    if (pct === null && validStatus === null) return null;
+
+    const entry = {
+      batteryPct: pct,
+      batteryStatus: validStatus,
+      updatedAt: Date.now(),
+    };
+    this.deviceBatteries.set(id, entry);
+    for (const device of this.knownDevices) {
+      if (device.runnerId === id) {
+        device.batteryPct = entry.batteryPct;
+        device.batteryStatus = entry.batteryStatus;
+        device.batteryUpdatedAt = entry.updatedAt;
+      }
+    }
+    return entry;
   }
 
   getDisplayName(runnerId, fallbackName = '') {
