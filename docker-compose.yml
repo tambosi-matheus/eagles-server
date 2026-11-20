@@ -9,11 +9,16 @@ services:
       INGEST_API_KEY: ${INGEST_API_KEY:-}
       APP_API_TOKEN: ${APP_API_TOKEN:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_SETUP_TOKEN: ${ADMIN_SETUP_TOKEN:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
+      PASSKEY_STORE_FILE: ${PASSKEY_STORE_FILE:-/app/auth/passkeys.json}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
+      WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://eaglesrunclub.com,https://www.eaglesrunclub.com,https://eagles.boomhut.dev}
       ROUTE_FILE: ${ROUTE_FILE:-/app/data/curitiba-route.json}
     volumes:
       - ./data:/app/data:ro
+      - ./auth:/app/auth
     expose:
       - "3000"
     networks:

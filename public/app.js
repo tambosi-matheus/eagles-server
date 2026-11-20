@@ -16,6 +16,7 @@ const sheetEl = document.getElementById('sheet');
 const sheetToggleEl = document.getElementById('sheet-toggle');
 const btnFit = document.getElementById('btn-fit');
 const btnRaw = document.getElementById('btn-raw');
+const btnLogout = document.getElementById('btn-logout');
 
 let routeLayer = null;
 let showRawGps = false;
@@ -47,6 +48,11 @@ btnRaw.addEventListener('click', () => {
       rawLayer.remove();
     }
   }
+});
+
+btnLogout?.addEventListener('click', async () => {
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  window.location.href = '/login?next=/';
 });
 
 function formatPace(secPerKm) {

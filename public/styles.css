@@ -77,11 +77,21 @@ body {
 
 .topbar-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   flex-shrink: 0;
 }
 
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
   background: var(--card);
   color: var(--text);
   border: 1px solid var(--border);
@@ -89,6 +99,7 @@ body {
   padding: 6px 10px;
   font-size: 12px;
   font-weight: 600;
+  text-decoration: none;
   cursor: pointer;
 }
 

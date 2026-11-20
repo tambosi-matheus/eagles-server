@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRoute } from './gpx-matcher.js';
+import { PasskeyManager } from './passkeys.js';
 import { RunnerStore } from './store.js';
 import { ScraperController } from './scraper-control.js';
 import {
@@ -30,13 +31,22 @@ const ROUTE_FILE =
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
 const API_KEY = process.env.INGEST_API_KEY || '';
 const APP_API_TOKEN = process.env.APP_API_TOKEN || '';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || process.env.AUTH_PASSWORD || API_KEY || '';
+const ADMIN_PASSWORD =
+  process.env.ADMIN_PASSWORD || process.env.AUTH_PASSWORD || process.env.ADMIN_SETUP_TOKEN || '';
+const ADMIN_SETUP_TOKEN = process.env.ADMIN_SETUP_TOKEN || '';
+const PASSKEY_STORE_FILE =
+  process.env.PASSKEY_STORE_FILE || path.resolve(__dirname, '../auth/passkeys.json');
+const WEBAUTHN_RP_ID = process.env.WEBAUTHN_RP_ID || '';
+const WEBAUTHN_ORIGIN = (process.env.WEBAUTHN_ORIGIN || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 const SESSION_SECRET =
   process.env.SESSION_SECRET ||
-  (ADMIN_PASSWORD || APP_API_TOKEN
+  (ADMIN_PASSWORD || APP_API_TOKEN || ADMIN_SETUP_TOKEN || API_KEY
     ? crypto
         .createHash('sha256')
-        .update(`eagles-session:${ADMIN_PASSWORD}:${APP_API_TOKEN}`)
+        .update(`eagles-session:${ADMIN_PASSWORD}:${APP_API_TOKEN}:${ADMIN_SETUP_TOKEN}:${API_KEY}`)
         .digest('hex')
     : '');
 const SCRAPER_NOVNC_HOST = process.env.SCRAPER_NOVNC_HOST || 'eagles-scrapper';
@@ -61,6 +71,12 @@ const MIME_TYPES = {
 const route = loadRoute(ROUTE_FILE);
 const store = new RunnerStore(route);
 const scraperControl = new ScraperController();
+const passkeys = new PasskeyManager({
+  storeFile: PASSKEY_STORE_FILE,
+  rpName: 'Eagles Run Club Admin',
+  rpID: WEBAUTHN_RP_ID,
+  expectedOrigins: WEBAUTHN_ORIGIN,
+});
 
 const apiLimiter = createRateLimiter({ windowMs: 60_000, max: 180 });
 const loginLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 10 });
@@ -181,12 +197,7 @@ function proxyNoVncHttp(req, res, url) {
   }
 
   if (url.pathname === '/auth' || url.pathname === '/auth/') {
-    res.writeHead(302, {
-      Location: '/auth/vnc.html?autoconnect=1&resize=scale&path=auth/websockify',
-      ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
-    });
-    res.end();
-    return;
+    return serveStatic(req, '/auth.html', res);
   }
 
   const upstreamPath = (url.pathname.slice('/auth'.length) || '/') + url.search;
@@ -293,6 +304,146 @@ const server = http.createServer(async (req, res) => {
       { ok: true },
       { 'Set-Cookie': buildClearSessionCookie({ secure: isHttpsRequest(req) }) }
     );
+  }
+
+  // Passkey status (used by /login to show Fingerprint/FaceID login & enrollment controls)
+  if (req.method === 'GET' && url.pathname === '/api/auth/passkey/status') {
+    const authenticated = isSessionAuthed(req);
+    return sendJson(req, res, 200, {
+      hasPasskeys: passkeys.hasPasskeys(),
+      setupEnabled: Boolean(ADMIN_SETUP_TOKEN),
+      passwordEnabled: Boolean(ADMIN_PASSWORD),
+      authenticated,
+      ...(authenticated
+        ? { count: passkeys.credentials.length, passkeys: passkeys.listPublicPasskeys() }
+        : {}),
+    });
+  }
+
+  // Passkey registration options (requires valid session OR ADMIN_SETUP_TOKEN)
+  if (req.method === 'POST' && url.pathname === '/api/auth/passkey/register/options') {
+    const ip = getClientIp(req);
+    const limit = loginLimiter(ip);
+    if (!limit.allowed) {
+      return sendJson(
+        req,
+        res,
+        429,
+        { error: 'Too many attempts. Please wait a few minutes.' },
+        { 'Retry-After': String(limit.retryAfterSeconds) }
+      );
+    }
+    try {
+      const body = await readJsonBody(req);
+      const setupToken = typeof body.setupToken === 'string' ? body.setupToken : '';
+      const canEnroll =
+        isSessionAuthed(req) ||
+        (Boolean(ADMIN_SETUP_TOKEN) && timingSafeEqualStr(setupToken, ADMIN_SETUP_TOKEN));
+      if (!canEnroll) {
+        return sendJson(req, res, 401, {
+          error: 'Invalid setup token or admin session required to enroll a passkey.',
+        });
+      }
+      const { challengeId, options } = await passkeys.createRegistrationOptions(req);
+      return sendJson(req, res, 200, { challengeId, options });
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
+  }
+
+  // Passkey registration verify (saves public key and starts an authenticated session)
+  if (req.method === 'POST' && url.pathname === '/api/auth/passkey/register/verify') {
+    const ip = getClientIp(req);
+    const limit = loginLimiter(ip);
+    if (!limit.allowed) {
+      return sendJson(
+        req,
+        res,
+        429,
+        { error: 'Too many attempts. Please wait a few minutes.' },
+        { 'Retry-After': String(limit.retryAfterSeconds) }
+      );
+    }
+    try {
+      const body = await readJsonBody(req);
+      const setupToken = typeof body.setupToken === 'string' ? body.setupToken : '';
+      const canEnroll =
+        isSessionAuthed(req) ||
+        (Boolean(ADMIN_SETUP_TOKEN) && timingSafeEqualStr(setupToken, ADMIN_SETUP_TOKEN));
+      if (!canEnroll) {
+        return sendJson(req, res, 401, {
+          error: 'Invalid setup token or admin session required to enroll a passkey.',
+        });
+      }
+      const saved = await passkeys.verifyRegistration(req, {
+        challengeId: body.challengeId,
+        response: body.response,
+        label: body.label,
+      });
+      const token = createSessionToken(SESSION_SECRET);
+      return sendJson(
+        req,
+        res,
+        200,
+        { ok: true, passkey: saved },
+        { 'Set-Cookie': buildSessionCookie(token, { secure: isHttpsRequest(req) }) }
+      );
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
+  }
+
+  // Passkey login options (Fingerprint / FaceID challenge)
+  if (req.method === 'POST' && url.pathname === '/api/auth/passkey/login/options') {
+    const ip = getClientIp(req);
+    const limit = loginLimiter(ip);
+    if (!limit.allowed) {
+      return sendJson(
+        req,
+        res,
+        429,
+        { error: 'Too many sign-in attempts. Please wait a few minutes.' },
+        { 'Retry-After': String(limit.retryAfterSeconds) }
+      );
+    }
+    try {
+      const { challengeId, options } = await passkeys.createAuthenticationOptions(req);
+      return sendJson(req, res, 200, { challengeId, options });
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
+  }
+
+  // Passkey login verify (verifies biometric assertion and sets HttpOnly session cookie)
+  if (req.method === 'POST' && url.pathname === '/api/auth/passkey/login/verify') {
+    const ip = getClientIp(req);
+    const limit = loginLimiter(ip);
+    if (!limit.allowed) {
+      return sendJson(
+        req,
+        res,
+        429,
+        { error: 'Too many sign-in attempts. Please wait a few minutes.' },
+        { 'Retry-After': String(limit.retryAfterSeconds) }
+      );
+    }
+    try {
+      const body = await readJsonBody(req);
+      const matched = await passkeys.verifyAuthentication(req, {
+        challengeId: body.challengeId,
+        response: body.response,
+      });
+      const token = createSessionToken(SESSION_SECRET);
+      return sendJson(
+        req,
+        res,
+        200,
+        { ok: true, passkey: matched },
+        { 'Set-Cookie': buildSessionCookie(token, { secure: isHttpsRequest(req) }) }
+      );
+    } catch (err) {
+      return sendJson(req, res, 401, { error: err.message });
+    }
   }
 
   // Health check (protected: App-to-App signed token, Web session, or Scraper key)

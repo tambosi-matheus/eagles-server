@@ -15,7 +15,11 @@
         <span id="status-badge" class="badge badge-connecting">Connecting…</span>
       </div>
       <div class="topbar-actions">
-        <a href="/" class="icon-btn">Map</a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="/" class="icon-btn">Map</a>
+          <a href="/devices" class="icon-btn active" aria-current="page">Devices</a>
+          <a href="/auth" class="icon-btn">Auth</a>
+        </nav>
         <button id="btn-logout" class="icon-btn" type="button">Sign Out</button>
       </div>
     </header>

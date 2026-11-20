@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f172a" />
+    <link rel="manifest" href="/manifest.json" />
+    <title>Google Sign-In · Eagles Run Club</title>
+    <link rel="stylesheet" href="/devices.css" />
+    <style>
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .auth-frame {
+        flex: 1;
+        width: 100%;
+        border: none;
+        background: #0f172a;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-title">
+        <span>Google Sign-In</span>
+        <span id="auth-badge" class="badge badge-connecting">Checking…</span>
+      </div>
+      <div class="topbar-actions">
+        <nav class="topbar-nav" aria-label="Primary">
+          <a href="/" class="icon-btn">Map</a>
+          <a href="/devices" class="icon-btn">Devices</a>
+          <a href="/auth" class="icon-btn active" aria-current="page">Auth</a>
+        </nav>
+        <button id="btn-logout" class="icon-btn" type="button">Sign Out</button>
+      </div>
+    </header>
+
+    <iframe
+      class="auth-frame"
+      title="Google Account Sign-In"
+      src="/auth/vnc.html?autoconnect=1&resize=scale&path=auth/websockify"
+    ></iframe>
+
+    <script>
+      const badgeEl = document.getElementById('auth-badge');
+      const btnLogout = document.getElementById('btn-logout');
+
+      async function checkAuthStatus() {
+        try {
+          const res = await fetch('/api/scraper', { cache: 'no-store' });
+          if (res.status === 401) {
+            window.location.href = '/login?next=/auth';
+            return;
+          }
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data.auth && data.auth.authenticated === true) {
+            badgeEl.textContent = 'Signed In';
+            badgeEl.className = 'badge badge-live';
+          } else if (data.scraperConnected) {
+            badgeEl.textContent = 'Sign-in Needed';
+            badgeEl.className = 'badge badge-connecting';
+          } else {
+            badgeEl.textContent = 'Offline';
+            badgeEl.className = 'badge badge-connecting';
+          }
+        } catch {
+          // Ignore transient polling errors
+        }
+      }
+
+      btnLogout?.addEventListener('click', async () => {
+        await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+        window.location.href = '/login?next=/auth';
+      });
+
+      checkAuthStatus();
+      setInterval(checkAuthStatus, 4000);
+    </script>
+  </body>
+</html>

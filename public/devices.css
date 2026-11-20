@@ -64,6 +64,20 @@ body {
   color: #fbbf24;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -78,7 +92,8 @@ body {
   cursor: pointer;
 }
 
-.icon-btn:hover {
+.icon-btn:hover,
+.icon-btn.active {
   border-color: var(--accent);
   color: var(--accent);
 }

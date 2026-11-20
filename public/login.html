@@ -3,9 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" content="#0A0A0A" />
     <link rel="manifest" href="/manifest.json" />
-    <title>Sign In · Eagles Run Club</title>
+    <title>Admin Sign In · Eagles Run Club</title>
     <style>
       * {
         box-sizing: border-box;
@@ -18,19 +18,19 @@
         place-items: center;
         padding: 20px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: #0f172a;
-        color: #f8fafc;
+        background: #0a0a0a;
+        color: #ffffff;
       }
       .card {
         width: 100%;
-        max-width: 380px;
-        background: #1e293b;
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 16px;
+        max-width: 420px;
+        background: #141414;
+        border: 1px solid #262626;
+        border-radius: 18px;
         padding: 26px 22px;
         display: grid;
         gap: 16px;
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
       }
       .brand {
         display: grid;
@@ -38,69 +38,152 @@
       }
       .kicker {
         font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 1.5px;
+        font-weight: 900;
+        letter-spacing: 1.8px;
         text-transform: uppercase;
-        color: #38bdf8;
+        color: #ff4d00;
       }
       h1 {
-        font-size: 22px;
-        font-weight: 800;
+        font-size: 24px;
+        font-weight: 900;
+        font-style: italic;
+        letter-spacing: 0.4px;
       }
       .subtitle {
         font-size: 13px;
-        color: #94a3b8;
+        color: #b3b3b3;
         line-height: 1.45;
+      }
+      .panel {
+        background: #1c1c1c;
+        border: 1px solid #262626;
+        border-radius: 14px;
+        padding: 16px;
+        display: grid;
+        gap: 10px;
+      }
+      .panel-title {
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .panel-hint {
+        font-size: 12px;
+        color: #a3a3a3;
+        line-height: 1.4;
+      }
+      .hidden {
+        display: none !important;
       }
       form {
         display: grid;
-        gap: 12px;
+        gap: 10px;
       }
       label {
-        font-size: 12px;
-        font-weight: 600;
-        color: #cbd5e1;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        color: #b3b3b3;
         display: grid;
         gap: 6px;
       }
       input {
         width: 100%;
-        background: #0f172a;
-        color: #f8fafc;
-        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: #0a0a0a;
+        color: #ffffff;
+        border: 1px solid #333333;
         border-radius: 10px;
         padding: 11px 12px;
         font-size: 15px;
       }
       input:focus {
         outline: none;
-        border-color: #38bdf8;
+        border-color: #ff4d00;
       }
       button {
-        background: #38bdf8;
-        color: #0f172a;
+        background: #ff4d00;
+        color: #0a0a0a;
         border: none;
         border-radius: 10px;
-        padding: 11px 14px;
-        font-size: 14px;
-        font-weight: 700;
+        padding: 12px 14px;
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
         cursor: pointer;
       }
-      button:disabled {
-        opacity: 0.55;
-        cursor: wait;
+      button.secondary {
+        background: #242424;
+        color: #ffffff;
+        border: 1px solid #383838;
       }
-      .error {
+      button.ghost {
+        background: transparent;
+        color: #b3b3b3;
+        border: 1px solid #2e2e2e;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .divider {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #737373;
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+      }
+      .divider::before,
+      .divider::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: #262626;
+      }
+      .msg {
         display: none;
         padding: 10px 12px;
         border-radius: 10px;
         font-size: 13px;
+        line-height: 1.4;
+      }
+      .msg.visible {
+        display: block;
+      }
+      .msg.error {
         background: rgba(239, 68, 68, 0.16);
         border: 1px solid rgba(239, 68, 68, 0.45);
         color: #fca5a5;
       }
-      .error.visible {
-        display: block;
+      .msg.success {
+        background: rgba(34, 197, 94, 0.16);
+        border: 1px solid rgba(34, 197, 94, 0.45);
+        color: #86efac;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        background: rgba(255, 77, 0, 0.16);
+        color: #ff6a2b;
+      }
+      .actions-row {
+        display: grid;
+        gap: 8px;
       }
     </style>
   </head>
@@ -108,33 +191,112 @@
     <main class="card">
       <div class="brand">
         <span class="kicker">Eagles Run Club</span>
-        <h1>Sign In</h1>
-        <p class="subtitle">Enter the club access code to continue.</p>
+        <h1 id="page-title">ADMIN SIGN IN</h1>
+        <p id="page-subtitle" class="subtitle">
+          Choose Fingerprint / FaceID or your access code to continue.
+        </p>
       </div>
 
-      <div id="error" class="error" role="alert"></div>
+      <div id="error" class="msg error" role="alert"></div>
+      <div id="success" class="msg success" role="status"></div>
 
-      <form id="login-form">
-        <label>
-          Access Code
-          <input
-            id="password"
-            type="password"
-            autocomplete="current-password"
-            placeholder="Enter access code"
-            required
-            autofocus
-          />
-        </label>
-        <button id="submit-btn" type="submit">Sign In</button>
-      </form>
+      <!-- STEP 1: Split Login View (Biometrics OR Password) -->
+      <div id="login-view" style="display: grid; gap: 14px;">
+        <!-- Option 1: Fingerprint / FaceID -->
+        <section class="panel">
+          <div class="panel-title">
+            <span>Fingerprint / FaceID</span>
+          </div>
+          <p id="biometric-hint" class="panel-hint">
+            Use your registered device biometrics for instant sign-in.
+          </p>
+          <button id="passkey-login-btn" type="button">Sign in with Fingerprint / FaceID</button>
+        </section>
+
+        <div class="divider">or</div>
+
+        <!-- Option 2: Access Code / Password -->
+        <section class="panel">
+          <div class="panel-title">
+            <span>Access Code</span>
+          </div>
+          <form id="login-form">
+            <label>
+              Password / Access Code
+              <input
+                id="password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Enter access code"
+                required
+              />
+            </label>
+            <button id="submit-btn" type="submit" class="secondary">Sign in with Code</button>
+          </form>
+        </section>
+      </div>
+
+      <!-- STEP 2: Post-Login Biometric Enrollment Prompt -->
+      <section id="enroll-view" class="panel hidden">
+        <div class="panel-title">
+          <span>Add Fingerprint / FaceID</span>
+          <span class="pill">OPTIONAL</span>
+        </div>
+        <p class="panel-hint">
+          You're signed in! Register this device now so you can unlock admin controls with your
+          Fingerprint or FaceID next time.
+        </p>
+        <form id="enroll-form">
+          <label>
+            Device Name
+            <input
+              id="device-label"
+              type="text"
+              maxlength="60"
+              placeholder="e.g. Android (Fingerprint) or iPhone (FaceID)"
+            />
+          </label>
+          <div class="actions-row">
+            <button id="enroll-btn" type="submit">Add Fingerprint / FaceID</button>
+            <button id="skip-btn" type="button" class="ghost">Skip for now → Continue</button>
+          </div>
+        </form>
+      </section>
     </main>
 
     <script>
-      const form = document.getElementById('login-form');
+      const pageTitleEl = document.getElementById('page-title');
+      const pageSubtitleEl = document.getElementById('page-subtitle');
+      const errorEl = document.getElementById('error');
+      const successEl = document.getElementById('success');
+      const loginView = document.getElementById('login-view');
+      const enrollView = document.getElementById('enroll-view');
+      const biometricHint = document.getElementById('biometric-hint');
+      const passkeyLoginBtn = document.getElementById('passkey-login-btn');
+      const loginForm = document.getElementById('login-form');
       const passwordEl = document.getElementById('password');
       const submitBtn = document.getElementById('submit-btn');
-      const errorEl = document.getElementById('error');
+      const enrollForm = document.getElementById('enroll-form');
+      const deviceLabelEl = document.getElementById('device-label');
+      const enrollBtn = document.getElementById('enroll-btn');
+      const skipBtn = document.getElementById('skip-btn');
+
+      function showError(msg) {
+        successEl.classList.remove('visible');
+        errorEl.textContent = msg;
+        errorEl.classList.add('visible');
+      }
+
+      function showSuccess(msg) {
+        errorEl.classList.remove('visible');
+        successEl.textContent = msg;
+        successEl.classList.add('visible');
+      }
+
+      function clearMessages() {
+        errorEl.classList.remove('visible');
+        successEl.classList.remove('visible');
+      }
 
       function getSafeNext() {
         const params = new URLSearchParams(window.location.search);
@@ -145,11 +307,131 @@
         return '/';
       }
 
-      form.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        errorEl.classList.remove('visible');
-        submitBtn.disabled = true;
+      function base64urlToBuffer(base64url) {
+        const pad = '='.repeat((4 - (base64url.length % 4)) % 4);
+        const base64 = (base64url + pad).replace(/-/g, '+').replace(/_/g, '/');
+        const bin = atob(base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes.buffer;
+      }
 
+      function bufferToBase64url(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let str = '';
+        for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
+        return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      }
+
+      function guessDeviceLabel() {
+        const ua = navigator.userAgent || '';
+        if (/iPhone/i.test(ua)) return 'iPhone (FaceID)';
+        if (/iPad/i.test(ua)) return 'iPad';
+        if (/Android/i.test(ua)) return 'Android (Fingerprint)';
+        if (/Windows/i.test(ua)) return 'Windows Hello';
+        if (/Mac/i.test(ua)) return 'Mac (TouchID)';
+        return 'My Device';
+      }
+
+      function showEnrollPrompt() {
+        clearMessages();
+        loginView.classList.add('hidden');
+        enrollView.classList.remove('hidden');
+        pageTitleEl.textContent = 'ENABLE BIOMETRICS';
+        pageSubtitleEl.textContent = 'Signed in with access code. Want to add this device?';
+        if (!deviceLabelEl.value) {
+          deviceLabelEl.value = guessDeviceLabel();
+        }
+        if (!window.PublicKeyCredential) {
+          enrollBtn.disabled = true;
+          showError('WebAuthn Passkeys are not supported in this browser.');
+        }
+      }
+
+      async function loadStatus() {
+        try {
+          const res = await fetch('/api/auth/passkey/status');
+          const data = await res.json();
+
+          if (data.authenticated) {
+            showEnrollPrompt();
+            return;
+          }
+
+          if (data.hasPasskeys) {
+            passkeyLoginBtn.disabled = !window.PublicKeyCredential;
+          } else {
+            passkeyLoginBtn.disabled = true;
+            biometricHint.textContent =
+              'No devices registered yet. Sign in with your access code below to register your Fingerprint or FaceID.';
+          }
+
+          if (!window.PublicKeyCredential) {
+            biometricHint.textContent =
+              'Passkeys require Chrome (Android) or Safari (iOS) over HTTPS.';
+          }
+        } catch {
+          showError('Could not load sign-in status.');
+        }
+      }
+
+      // Option 1: Sign in with Fingerprint / FaceID
+      passkeyLoginBtn.addEventListener('click', async () => {
+        clearMessages();
+        passkeyLoginBtn.disabled = true;
+        try {
+          const optRes = await fetch('/api/auth/passkey/login/options', { method: 'POST' });
+          const optData = await optRes.json().catch(() => ({}));
+          if (!optRes.ok) throw new Error(optData.error || 'Could not start biometric sign-in.');
+
+          const publicKey = {
+            ...optData.options,
+            challenge: base64urlToBuffer(optData.options.challenge),
+            allowCredentials: (optData.options.allowCredentials || []).map((c) => ({
+              ...c,
+              id: base64urlToBuffer(c.id),
+            })),
+          };
+
+          const assertion = await navigator.credentials.get({ publicKey });
+          if (!assertion) throw new Error('Biometric prompt was cancelled.');
+
+          const verifyRes = await fetch('/api/auth/passkey/login/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              challengeId: optData.challengeId,
+              response: {
+                id: assertion.id,
+                rawId: bufferToBase64url(assertion.rawId),
+                type: assertion.type,
+                clientExtensionResults: assertion.getClientExtensionResults?.() || {},
+                response: {
+                  authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
+                  clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
+                  signature: bufferToBase64url(assertion.response.signature),
+                  userHandle: assertion.response.userHandle
+                    ? bufferToBase64url(assertion.response.userHandle)
+                    : null,
+                },
+              },
+            }),
+          });
+          const verifyData = await verifyRes.json().catch(() => ({}));
+          if (!verifyRes.ok) throw new Error(verifyData.error || 'Biometric sign-in failed.');
+
+          window.location.href = getSafeNext();
+        } catch (err) {
+          showError(err.message || 'Biometric sign-in failed.');
+          passkeyLoginBtn.disabled = false;
+        }
+      });
+
+      // Option 2: Sign in with Access Code -> offer Fingerprint / FaceID enrollment
+      loginForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        clearMessages();
+        submitBtn.disabled = true;
         try {
           const res = await fetch('/api/auth/login', {
             method: 'POST',
@@ -157,18 +439,98 @@
             body: JSON.stringify({ password: passwordEl.value }),
           });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            throw new Error(data.error || 'Invalid access code.');
+          if (!res.ok) throw new Error(data.error || 'Invalid access code.');
+
+          if (window.PublicKeyCredential) {
+            showEnrollPrompt();
+          } else {
+            window.location.href = getSafeNext();
           }
-          window.location.href = getSafeNext();
         } catch (err) {
-          errorEl.textContent = err.message || 'Sign in failed. Please try again.';
-          errorEl.classList.add('visible');
+          showError(err.message || 'Sign in failed. Please try again.');
           passwordEl.select();
         } finally {
           submitBtn.disabled = false;
         }
       });
+
+      // Step 2: Register this device's Fingerprint / FaceID using the active session
+      enrollForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        clearMessages();
+        enrollBtn.disabled = true;
+        try {
+          const label = deviceLabelEl.value.trim() || guessDeviceLabel();
+
+          const optRes = await fetch('/api/auth/passkey/register/options', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          const optData = await optRes.json().catch(() => ({}));
+          if (!optRes.ok) throw new Error(optData.error || 'Could not start biometric setup.');
+
+          const publicKey = {
+            ...optData.options,
+            challenge: base64urlToBuffer(optData.options.challenge),
+            user: {
+              ...optData.options.user,
+              id: base64urlToBuffer(optData.options.user.id),
+            },
+            excludeCredentials: (optData.options.excludeCredentials || []).map((c) => ({
+              ...c,
+              id: base64urlToBuffer(c.id),
+            })),
+          };
+
+          const credential = await navigator.credentials.create({ publicKey });
+          if (!credential) throw new Error('Biometric registration was cancelled.');
+
+          const verifyRes = await fetch('/api/auth/passkey/register/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              label,
+              challengeId: optData.challengeId,
+              response: {
+                id: credential.id,
+                rawId: bufferToBase64url(credential.rawId),
+                type: credential.type,
+                clientExtensionResults: credential.getClientExtensionResults?.() || {},
+                response: {
+                  attestationObject: bufferToBase64url(credential.response.attestationObject),
+                  clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+                  transports: credential.response.getTransports
+                    ? credential.response.getTransports()
+                    : [],
+                },
+              },
+            }),
+          });
+          const verifyData = await verifyRes.json().catch(() => ({}));
+          if (!verifyRes.ok) throw new Error(verifyData.error || 'Could not save passkey.');
+
+          showSuccess(`Saved "${verifyData.passkey?.label || label}"! Redirecting…`);
+          setTimeout(() => {
+            window.location.href = getSafeNext();
+          }, 650);
+        } catch (err) {
+          if (err && err.name === 'InvalidStateError') {
+            showSuccess(
+              'This passkey vault (e.g. Google / Chrome) already has your synced Eagles Run Club passkey! You can sign in with FaceID directly, or tap again and choose iCloud Keychain / Passwords to save a separate one.'
+            );
+          } else {
+            showError(err.message || 'Biometric registration failed.');
+          }
+          enrollBtn.disabled = false;
+        }
+      });
+
+      skipBtn.addEventListener('click', () => {
+        window.location.href = getSafeNext();
+      });
+
+      loadStatus();
     </script>
   </body>
 </html>
