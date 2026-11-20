@@ -7,6 +7,10 @@ services:
       PORT: 3000
       HOST: 0.0.0.0
       INGEST_API_KEY: ${INGEST_API_KEY:-}
+      APP_API_TOKEN: ${APP_API_TOKEN:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://eaglesrunclub.com,https://www.eaglesrunclub.com,https://eagles.boomhut.dev}
       ROUTE_FILE: ${ROUTE_FILE:-/app/data/curitiba-route.json}
     volumes:
       - ./data:/app/data:ro

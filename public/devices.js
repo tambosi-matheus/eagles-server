@@ -5,6 +5,7 @@ const statusSummaryEl = document.getElementById('status-summary');
 const statusSubEl = document.getElementById('status-sub');
 const btnStartAll = document.getElementById('btn-start-all');
 const btnStopAll = document.getElementById('btn-stop-all');
+const btnLogout = document.getElementById('btn-logout');
 const deviceListEl = document.getElementById('device-list');
 
 let state = {
@@ -254,6 +255,10 @@ async function fetchStatus() {
   if (busy || editingRunnerId) return;
   try {
     const res = await fetch('/api/scraper', { cache: 'no-store' });
+    if (res.status === 401) {
+      window.location.href = '/login?next=/devices';
+      return;
+    }
     if (!res.ok) throw new Error('status');
     const data = await res.json();
     state = data;
@@ -369,6 +374,11 @@ btnStartAll.addEventListener('click', () => {
 
 btnStopAll.addEventListener('click', () => {
   sendCommand({ action: 'stop' });
+});
+
+btnLogout?.addEventListener('click', async () => {
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  window.location.href = '/login?next=/devices';
 });
 
 fetchStatus();

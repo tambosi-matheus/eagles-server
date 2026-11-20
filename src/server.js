@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 import fs from 'node:fs';
@@ -6,6 +7,18 @@ import { fileURLToPath } from 'node:url';
 import { loadRoute } from './gpx-matcher.js';
 import { RunnerStore } from './store.js';
 import { ScraperController } from './scraper-control.js';
+import {
+  buildClearSessionCookie,
+  buildSecurityHeaders,
+  buildSessionCookie,
+  createRateLimiter,
+  createSessionToken,
+  getClientIp,
+  hasValidSessionCookie,
+  timingSafeEqualStr,
+  verifyApiKey,
+  verifyAppRequest,
+} from './security.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,9 +29,25 @@ const ROUTE_FILE =
   process.env.ROUTE_FILE || path.resolve(__dirname, '../data/curitiba-route.json');
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
 const API_KEY = process.env.INGEST_API_KEY || '';
+const APP_API_TOKEN = process.env.APP_API_TOKEN || '';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || process.env.AUTH_PASSWORD || API_KEY || '';
+const SESSION_SECRET =
+  process.env.SESSION_SECRET ||
+  (ADMIN_PASSWORD || APP_API_TOKEN
+    ? crypto
+        .createHash('sha256')
+        .update(`eagles-session:${ADMIN_PASSWORD}:${APP_API_TOKEN}`)
+        .digest('hex')
+    : '');
 const SCRAPER_NOVNC_HOST = process.env.SCRAPER_NOVNC_HOST || 'eagles-scrapper';
 const SCRAPER_NOVNC_PORT = Number(process.env.SCRAPER_NOVNC_PORT || 6080);
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
+const ALLOWED_ORIGINS = (
+  process.env.ALLOWED_ORIGINS ||
+  'https://eaglesrunclub.com,https://www.eaglesrunclub.com,https://eagles.boomhut.dev'
+)
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -33,15 +62,33 @@ const route = loadRoute(ROUTE_FILE);
 const store = new RunnerStore(route);
 const scraperControl = new ScraperController();
 
-function sendJson(res, status, data) {
+const apiLimiter = createRateLimiter({ windowMs: 60_000, max: 180 });
+const loginLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 10 });
+
+function isHttpsRequest(req) {
+  return String(req.headers['x-forwarded-proto'] || '').toLowerCase() === 'https';
+}
+
+function sendJson(req, res, status, data, extraHeaders = {}) {
   const body = JSON.stringify(data);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
+    ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
+    ...extraHeaders,
   });
   res.end(body);
+}
+
+function redirectToLogin(req, res, nextPath = '/') {
+  const safeNext =
+    typeof nextPath === 'string' && nextPath.startsWith('/') && !nextPath.startsWith('//')
+      ? nextPath
+      : '/';
+  res.writeHead(302, {
+    Location: `/login?next=${encodeURIComponent(safeNext)}`,
+    ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
+  });
+  res.end();
 }
 
 function readJsonBody(req) {
@@ -65,23 +112,28 @@ function readJsonBody(req) {
   });
 }
 
-function serveStatic(reqPath, res) {
+function serveStatic(req, reqPath, res) {
   let safePath = reqPath;
   if (safePath === '/') {
     safePath = '/index.html';
   } else if (safePath === '/devices' || safePath === '/devices/') {
     safePath = '/devices.html';
+  } else if (safePath === '/login' || safePath === '/login/') {
+    safePath = '/login.html';
   }
   const fullPath = path.resolve(PUBLIC_DIR, `.${safePath}`);
   if (!fullPath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403);
+    res.writeHead(403, buildSecurityHeaders(req, ALLOWED_ORIGINS));
     res.end('Forbidden');
     return;
   }
 
   fs.readFile(fullPath, (err, content) => {
     if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.writeHead(404, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
+      });
       res.end('Not Found');
       return;
     }
@@ -89,34 +141,49 @@ function serveStatic(reqPath, res) {
     res.writeHead(200, {
       'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
+      ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
     });
     res.end(content);
   });
 }
 
-function checkOptionalBasicAuth(req, res) {
-  if (!AUTH_PASSWORD) return true;
-  const authHeader = req.headers.authorization || '';
-  if (authHeader.startsWith('Basic ')) {
-    const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8');
-    const sep = decoded.indexOf(':');
-    const pass = sep >= 0 ? decoded.slice(sep + 1) : decoded;
-    if (pass === AUTH_PASSWORD) return true;
-  }
-  res.writeHead(401, {
-    'WWW-Authenticate': 'Basic realm="Eagles Auth"',
-    'Content-Type': 'text/plain; charset=utf-8',
-  });
-  res.end('Authentication required');
-  return false;
+function isScraperAuthed(req) {
+  return verifyApiKey(req, API_KEY);
+}
+
+function isSessionAuthed(req) {
+  return hasValidSessionCookie(req, SESSION_SECRET);
+}
+
+function isAppAuthed(req, pathname) {
+  return verifyAppRequest(req, pathname, { appToken: APP_API_TOKEN }).ok;
+}
+
+function canReadAppApi(req, pathname) {
+  return isAppAuthed(req, pathname) || isSessionAuthed(req) || isScraperAuthed(req);
+}
+
+function canControlAdmin(req) {
+  return isSessionAuthed(req) || isScraperAuthed(req);
 }
 
 function proxyNoVncHttp(req, res, url) {
-  if (!checkOptionalBasicAuth(req, res)) return;
+  if (!isSessionAuthed(req)) {
+    if (url.pathname === '/auth' || url.pathname === '/auth/' || url.pathname.endsWith('.html')) {
+      return redirectToLogin(req, res, '/auth');
+    }
+    res.writeHead(401, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
+    });
+    res.end('Unauthorized');
+    return;
+  }
 
   if (url.pathname === '/auth' || url.pathname === '/auth/') {
     res.writeHead(302, {
       Location: '/auth/vnc.html?autoconnect=1&resize=scale&path=auth/websockify',
+      ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
     });
     res.end();
     return;
@@ -142,7 +209,10 @@ function proxyNoVncHttp(req, res, url) {
 
   proxyReq.on('error', () => {
     if (!res.headersSent) {
-      res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.writeHead(502, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
+      });
     }
     res.end('Sign-in service is currently unavailable. Please try again in a moment.');
   });
@@ -154,18 +224,83 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
-    });
+    res.writeHead(204, buildSecurityHeaders(req, ALLOWED_ORIGINS));
     res.end();
     return;
   }
 
-  // Health check
+  // Rate limit all /api/* requests per client IP
+  if (url.pathname.startsWith('/api/')) {
+    const ip = getClientIp(req);
+    const limit = apiLimiter(ip);
+    if (!limit.allowed) {
+      return sendJson(
+        req,
+        res,
+        429,
+        { error: 'Too many requests. Please try again shortly.' },
+        { 'Retry-After': String(limit.retryAfterSeconds) }
+      );
+    }
+  }
+
+  // Public login screen + PWA manifest
+  if (
+    req.method === 'GET' &&
+    (url.pathname === '/login' || url.pathname === '/login/' || url.pathname === '/manifest.json')
+  ) {
+    return serveStatic(req, url.pathname, res);
+  }
+
+  // Web session login (rate-limited)
+  if (req.method === 'POST' && url.pathname === '/api/auth/login') {
+    const ip = getClientIp(req);
+    const limit = loginLimiter(ip);
+    if (!limit.allowed) {
+      return sendJson(
+        req,
+        res,
+        429,
+        { error: 'Too many sign-in attempts. Please wait a few minutes.' },
+        { 'Retry-After': String(limit.retryAfterSeconds) }
+      );
+    }
+    try {
+      const body = await readJsonBody(req);
+      const password = typeof body.password === 'string' ? body.password : '';
+      if (!ADMIN_PASSWORD || !timingSafeEqualStr(password, ADMIN_PASSWORD)) {
+        return sendJson(req, res, 401, { error: 'Invalid access code.' });
+      }
+      const token = createSessionToken(SESSION_SECRET);
+      return sendJson(
+        req,
+        res,
+        200,
+        { ok: true },
+        { 'Set-Cookie': buildSessionCookie(token, { secure: isHttpsRequest(req) }) }
+      );
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
+  }
+
+  // Web session logout
+  if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
+    return sendJson(
+      req,
+      res,
+      200,
+      { ok: true },
+      { 'Set-Cookie': buildClearSessionCookie({ secure: isHttpsRequest(req) }) }
+    );
+  }
+
+  // Health check (protected: App-to-App signed token, Web session, or Scraper key)
   if (req.method === 'GET' && url.pathname === '/api/health') {
-    return sendJson(res, 200, {
+    if (!canReadAppApi(req, url.pathname)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    return sendJson(req, res, 200, {
       ok: true,
       route: route.name,
       totalKm: Number((route.totalMeters / 1000).toFixed(2)),
@@ -174,9 +309,12 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // Full marathon route geometry for the map
+  // Full marathon route geometry (App-to-App signed token or Web session)
   if (req.method === 'GET' && url.pathname === '/api/route') {
-    return sendJson(res, 200, {
+    if (!canReadAppApi(req, url.pathname)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    return sendJson(req, res, 200, {
       name: route.name,
       city: route.city,
       totalMeters: Math.round(route.totalMeters),
@@ -186,21 +324,26 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // Snapshot of all runners
+  // Snapshot of all runners (App-to-App signed token or Web session)
   if (req.method === 'GET' && url.pathname === '/api/state') {
-    return sendJson(res, 200, store.getSnapshot());
+    if (!canReadAppApi(req, url.pathname)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    return sendJson(req, res, 200, store.getSnapshot());
   }
 
-  // Live SSE stream for mobile viewers
+  // Live SSE stream for web map viewers (App-to-App signed token or Web session)
   if (req.method === 'GET' && url.pathname === '/api/stream') {
+    if (!canReadAppApi(req, url.pathname)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
+      ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
     });
 
-    // Send initial snapshot immediately
     res.write(`event: snapshot\ndata: ${JSON.stringify(store.getSnapshot())}\n\n`);
 
     const unsubscribe = store.subscribe((event, payload) => {
@@ -218,71 +361,83 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Remote browser login UI (proxied to eagles-scrapper noVNC)
+  // Remote browser login UI (proxied to eagles-scrapper noVNC, requires Web session)
   if (url.pathname === '/auth' || url.pathname.startsWith('/auth/')) {
     return proxyNoVncHttp(req, res, url);
   }
 
-  // Scraper control status
+  // Scraper control status (Admin session or Scraper key)
   if (req.method === 'GET' && url.pathname === '/api/scraper') {
-    return sendJson(res, 200, scraperControl.getStatus());
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    return sendJson(req, res, 200, scraperControl.getStatus());
   }
 
-  // Report scraper Google authentication status
+  // Report scraper Google authentication status (Scraper-only X-API-Key)
   if (req.method === 'POST' && url.pathname === '/api/scraper/status') {
-    if (API_KEY && req.headers['x-api-key'] !== API_KEY) {
-      return sendJson(res, 401, { error: 'Unauthorized: invalid X-API-Key' });
+    if (!isScraperAuthed(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
     }
     try {
       const body = await readJsonBody(req);
       const auth = scraperControl.setAuthStatus(body);
-      return sendJson(res, 200, { ok: true, auth });
+      return sendJson(req, res, 200, { ok: true, auth });
     } catch (err) {
-      return sendJson(res, 400, { error: err.message });
+      return sendJson(req, res, 400, { error: err.message });
     }
   }
 
-  // Register configured devices reported by eagles-scrapper
+  // Register configured devices reported by eagles-scrapper (Scraper-only X-API-Key)
   if (req.method === 'POST' && url.pathname === '/api/scraper/devices') {
-    if (API_KEY && req.headers['x-api-key'] !== API_KEY) {
-      return sendJson(res, 401, { error: 'Unauthorized: invalid X-API-Key' });
+    if (!isScraperAuthed(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
     }
     try {
       const body = await readJsonBody(req);
       const devices = Array.isArray(body) ? body : body.devices;
       const registered = scraperControl.setKnownDevices(devices);
       store.syncActiveDevices(scraperControl.getActiveDevices());
-      return sendJson(res, 200, { ok: true, count: registered.length, knownDevices: registered });
+      return sendJson(req, res, 200, { ok: true, count: registered.length, knownDevices: registered });
     } catch (err) {
-      return sendJson(res, 400, { error: err.message });
+      return sendJson(req, res, 400, { error: err.message });
     }
   }
 
-  // Rename a device (updates /devices, live web map, and mobile app)
+  // Rename a device (Admin session or Scraper key)
   if (req.method === 'POST' && url.pathname === '/api/scraper/rename') {
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
     try {
       const body = await readJsonBody(req);
       const updated = scraperControl.renameDevice(body.runnerId, body.name);
       store.renameRunner(updated.runnerId, updated.name);
-      return sendJson(res, 200, { ok: true, ...updated });
+      return sendJson(req, res, 200, { ok: true, ...updated });
     } catch (err) {
-      return sendJson(res, 400, { error: err.message });
+      return sendJson(req, res, 400, { error: err.message });
     }
   }
 
-  // Set per-device location update rate (in seconds)
+  // Set per-device location update rate (Admin session or Scraper key)
   if (req.method === 'POST' && url.pathname === '/api/scraper/interval') {
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
     try {
       const body = await readJsonBody(req);
       const updated = scraperControl.setDeviceInterval(body.runnerId, body.intervalSeconds);
-      return sendJson(res, 200, { ok: true, ...updated });
+      return sendJson(req, res, 200, { ok: true, ...updated });
     } catch (err) {
-      return sendJson(res, 400, { error: err.message });
+      return sendJson(req, res, 400, { error: err.message });
     }
   }
 
-  // Scraper start/stop command endpoint (single endpoint for start & stop + device selection)
+  // Scraper start/stop command endpoint (Admin session or Scraper key)
   if (req.method === 'POST' && url.pathname === '/api/scraper') {
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
     try {
       const body = await readJsonBody(req);
       const action = body.action ?? url.searchParams.get('action') ?? undefined;
@@ -294,30 +449,29 @@ const server = http.createServer(async (req, res) => {
             : undefined;
       const result = scraperControl.handleCommand({ action, devices });
       store.syncActiveDevices(scraperControl.getActiveDevices());
-      return sendJson(res, 200, result);
+      return sendJson(req, res, 200, result);
     } catch (err) {
-      return sendJson(res, 400, { error: err.message });
+      return sendJson(req, res, 400, { error: err.message });
     }
   }
 
-  // Live SSE command stream consumed by eagles-scrapper
+  // Live SSE command stream consumed by eagles-scrapper (Scraper-only X-API-Key)
   if (req.method === 'GET' && url.pathname === '/api/scraper/events') {
-    if (API_KEY && req.headers['x-api-key'] !== API_KEY) {
-      return sendJson(res, 401, { error: 'Unauthorized: invalid X-API-Key' });
+    if (!isScraperAuthed(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
     }
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
+      ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
     });
 
     const unsubscribe = scraperControl.subscribe((event, payload) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
     });
 
-    // Send current state immediately so reconnecting scrapers sync up
     res.write(`event: state\ndata: ${JSON.stringify(scraperControl.getStatus())}\n\n`);
 
     const heartbeat = setInterval(() => {
@@ -331,10 +485,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Ingest one or many runner location pings (called by the scraper or simulator)
+  // Ingest runner location pings (Scraper-only X-API-Key)
   if (req.method === 'POST' && url.pathname === '/api/locations') {
-    if (API_KEY && req.headers['x-api-key'] !== API_KEY) {
-      return sendJson(res, 401, { error: 'Unauthorized: invalid X-API-Key' });
+    if (!isScraperAuthed(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
     }
     try {
       const body = await readJsonBody(req);
@@ -343,42 +497,43 @@ const server = http.createServer(async (req, res) => {
         const customName = scraperControl.getDisplayName(p?.runnerId, p?.name);
         return store.ingestPing(customName ? { ...p, name: customName } : p);
       });
-      return sendJson(res, 200, { accepted: results.length, runners: results });
+      return sendJson(req, res, 200, { accepted: results.length, runners: results });
     } catch (err) {
-      return sendJson(res, 400, { error: err.message });
+      return sendJson(req, res, 400, { error: err.message });
     }
   }
 
-  // Serve mobile web UI
+  // Protected web UI (/, /devices, and their static assets require a valid session cookie)
   if (req.method === 'GET') {
-    return serveStatic(url.pathname, res);
+    if (!isSessionAuthed(req)) {
+      const isPage =
+        url.pathname === '/' ||
+        url.pathname === '/devices' ||
+        url.pathname === '/devices/' ||
+        url.pathname.endsWith('.html');
+      if (isPage) {
+        return redirectToLogin(req, res, url.pathname + url.search);
+      }
+      res.writeHead(401, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        ...buildSecurityHeaders(req, ALLOWED_ORIGINS),
+      });
+      res.end('Unauthorized');
+      return;
+    }
+    return serveStatic(req, url.pathname, res);
   }
 
-  res.writeHead(405);
+  res.writeHead(405, buildSecurityHeaders(req, ALLOWED_ORIGINS));
   res.end('Method Not Allowed');
 });
 
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (!url.pathname.startsWith('/auth/')) {
+  if (!url.pathname.startsWith('/auth/') || !isSessionAuthed(req)) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
     return;
-  }
-
-  if (AUTH_PASSWORD) {
-    const authHeader = req.headers.authorization || '';
-    let ok = false;
-    if (authHeader.startsWith('Basic ')) {
-      const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8');
-      const sep = decoded.indexOf(':');
-      const pass = sep >= 0 ? decoded.slice(sep + 1) : decoded;
-      ok = pass === AUTH_PASSWORD;
-    }
-    if (!ok) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Eagles Auth"\r\n\r\n');
-      socket.destroy();
-      return;
-    }
   }
 
   const upstreamPath = (url.pathname.slice('/auth'.length) || '/') + url.search;
@@ -410,4 +565,7 @@ server.listen(PORT, HOST, () => {
   console.log(
     `Loaded route: ${route.name} (${(route.totalMeters / 1000).toFixed(2)} km, ${route.points.length} waypoints)`
   );
+  if (!API_KEY) console.warn('WARNING: INGEST_API_KEY is not set.');
+  if (!APP_API_TOKEN) console.warn('WARNING: APP_API_TOKEN is not set (mobile app API calls will be rejected).');
+  if (!ADMIN_PASSWORD) console.warn('WARNING: ADMIN_PASSWORD is not set (web login disabled).');
 });

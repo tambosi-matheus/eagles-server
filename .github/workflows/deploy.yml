@@ -48,8 +48,11 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 "${VPS_USER}@${VPS_HOST}" bash -s <<EOF
             set -euo pipefail
             cd /root/apps/eagles-server
+            touch .env
             if [ -n "${INGEST_API_KEY}" ]; then
-              printf 'INGEST_API_KEY=%s\n' "${INGEST_API_KEY}" > .env
+              grep -v '^INGEST_API_KEY=' .env > .env.tmp || true
+              printf 'INGEST_API_KEY=%s\n' "${INGEST_API_KEY}" >> .env.tmp
+              mv .env.tmp .env
             fi
             docker network inspect boomhut_ingress >/dev/null 2>&1 || docker network create boomhut_ingress
             docker compose up -d --build
