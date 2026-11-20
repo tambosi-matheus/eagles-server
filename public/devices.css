@@ -91,45 +91,6 @@ body {
   gap: 14px;
 }
 
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
-}
-
-.auth-card {
-  display: grid;
-  gap: 8px;
-}
-
-.auth-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.auth-row {
-  display: flex;
-  gap: 8px;
-}
-
-.auth-row input {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 14px;
-}
-
-.auth-row input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
 .alert {
   padding: 10px 12px;
   border-radius: 10px;

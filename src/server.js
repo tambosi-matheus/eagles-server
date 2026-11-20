@@ -160,10 +160,7 @@ const server = http.createServer(async (req, res) => {
 
   // Scraper control status
   if (req.method === 'GET' && url.pathname === '/api/scraper') {
-    return sendJson(res, 200, {
-      ...scraperControl.getStatus(),
-      authRequired: Boolean(API_KEY),
-    });
+    return sendJson(res, 200, scraperControl.getStatus());
   }
 
   // Register configured devices reported by eagles-scrapper
@@ -183,9 +180,6 @@ const server = http.createServer(async (req, res) => {
 
   // Scraper start/stop command endpoint (single endpoint for start & stop + device selection)
   if (req.method === 'POST' && url.pathname === '/api/scraper') {
-    if (API_KEY && req.headers['x-api-key'] !== API_KEY) {
-      return sendJson(res, 401, { error: 'Unauthorized: invalid X-API-Key' });
-    }
     try {
       const body = await readJsonBody(req);
       const action = body.action ?? url.searchParams.get('action') ?? undefined;

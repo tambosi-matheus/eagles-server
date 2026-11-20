@@ -1,9 +1,4 @@
-const API_KEY_STORAGE = 'eagles_api_key';
-
-const scraperBadgeEl = document.getElementById('scraper-badge');
-const authCardEl = document.getElementById('auth-card');
-const apiKeyInput = document.getElementById('api-key-input');
-const btnSaveKey = document.getElementById('btn-save-key');
+const statusBadgeEl = document.getElementById('status-badge');
 const alertBoxEl = document.getElementById('alert-box');
 const statusSummaryEl = document.getElementById('status-summary');
 const statusSubEl = document.getElementById('status-sub');
@@ -16,15 +11,8 @@ let state = {
   devices: [],
   knownDevices: [],
   scraperConnected: false,
-  authRequired: false,
 };
 let busy = false;
-
-apiKeyInput.value = localStorage.getItem(API_KEY_STORAGE) || '';
-
-function getApiKey() {
-  return apiKeyInput.value.trim();
-}
 
 function showError(msg) {
   if (!msg) {
@@ -68,33 +56,29 @@ function getActiveDeviceIds() {
 }
 
 function render() {
-  // Auth card visibility
-  authCardEl.classList.toggle('hidden', !state.authRequired);
-
-  // Scraper connection badge
   if (state.scraperConnected) {
-    scraperBadgeEl.textContent = 'Scraper Online';
-    scraperBadgeEl.className = 'badge badge-live';
+    statusBadgeEl.textContent = 'Online';
+    statusBadgeEl.className = 'badge badge-live';
   } else {
-    scraperBadgeEl.textContent = 'Scraper Offline';
-    scraperBadgeEl.className = 'badge badge-connecting';
+    statusBadgeEl.textContent = 'Offline';
+    statusBadgeEl.className = 'badge badge-connecting';
   }
 
   const known = state.knownDevices || [];
   const activeCount = known.filter((d) => isDeviceActive(d)).length;
 
   if (state.active) {
-    statusSummaryEl.textContent = 'Collecting';
+    statusSummaryEl.textContent = 'Tracking Active';
     statusSubEl.textContent =
       known.length > 0
-        ? `${activeCount} of ${known.length} device${known.length === 1 ? '' : 's'} active`
-        : state.devices === null
-          ? 'All devices active'
-          : `${(state.devices || []).length} device(s) active`;
+        ? `${activeCount} of ${known.length} ${known.length === 1 ? 'device' : 'devices'} active`
+        : 'Tracking in progress';
   } else {
-    statusSummaryEl.textContent = 'Idle';
+    statusSummaryEl.textContent = 'Paused';
     statusSubEl.textContent =
-      known.length > 0 ? 'Toggle a device to start collecting' : 'Waiting for scraper to connect';
+      known.length > 0
+        ? 'Turn on a device to start live tracking'
+        : 'Waiting for devices to come online';
   }
 
   btnStartAll.disabled = busy || known.length === 0 || (state.active && activeCount === known.length);
@@ -103,8 +87,8 @@ function render() {
   if (known.length === 0) {
     deviceListEl.innerHTML = `
       <div class="empty-state">
-        No devices reported yet.<br />
-        Start <code>eagles-scrapper</code> and sign into Google Find Hub — configured devices will appear here automatically.
+        No devices available right now.<br />
+        Please check back in a moment.
       </div>`;
     return;
   }
@@ -122,11 +106,9 @@ function render() {
               <span>${escapeHtml(device.name)}</span>
               ${device.bib ? `<span class="device-bib">#${escapeHtml(device.bib)}</span>` : ''}
             </div>
-            <div class="device-meta">
-              ${escapeHtml(device.deviceName)} · ${escapeHtml(device.runnerId)}
-            </div>
+            <div class="device-meta">${escapeHtml(device.deviceName)}</div>
           </div>
-          <label class="switch" aria-label="Toggle ${escapeHtml(device.name)}">
+          <label class="switch" aria-label="Toggle tracking for ${escapeHtml(device.name)}">
             <input
               type="checkbox"
               data-runner-id="${escapeHtml(device.runnerId)}"
@@ -151,12 +133,13 @@ async function fetchStatus() {
   if (busy) return;
   try {
     const res = await fetch('/api/scraper', { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error('status');
     const data = await res.json();
     state = data;
+    showError('');
     render();
-  } catch (err) {
-    showError(`Failed to load scraper status: ${err.message}`);
+  } catch {
+    showError('Unable to connect right now. Retrying…');
   }
 }
 
@@ -165,27 +148,19 @@ async function sendCommand(payload) {
   showError('');
   render();
 
-  const headers = { 'Content-Type': 'application/json' };
-  const key = getApiKey();
-  if (key) headers['X-API-Key'] = key;
-
   try {
     const res = await fetch('/api/scraper', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      if (res.status === 401) {
-        state.authRequired = true;
-        apiKeyInput.focus();
-      }
-      throw new Error(data.error || `HTTP ${res.status}`);
+      throw new Error('update_failed');
     }
     state = { ...state, ...data };
-  } catch (err) {
-    showError(err.message);
+  } catch {
+    showError('Could not update tracking. Please try again.');
     await fetchStatus();
   } finally {
     busy = false;
@@ -209,11 +184,6 @@ async function toggleDevice(runnerId, enabled) {
     await sendCommand({ action: 'start', devices: nextActive });
   }
 }
-
-btnSaveKey.addEventListener('click', () => {
-  localStorage.setItem(API_KEY_STORAGE, getApiKey());
-  showError('');
-});
 
 btnStartAll.addEventListener('click', () => {
   const allIds = state.knownDevices.map((d) => d.runnerId);
