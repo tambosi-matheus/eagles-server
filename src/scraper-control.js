@@ -50,6 +50,7 @@ export class ScraperController {
       updatedAt: null,
     };
     this.knownDevices = [];
+    this.customNames = new Map();
     this.auth = {
       authenticated: null, // null = unknown/not yet reported, true = signed in, false = needs login
       reason: null,
@@ -76,14 +77,50 @@ export class ScraperController {
     }
     this.knownDevices = devices
       .filter((d) => d && (d.runnerId || d.deviceName || d.name))
-      .map((d) => ({
-        runnerId: String(d.runnerId || d.deviceName || d.name).trim(),
-        deviceName: String(d.deviceName || d.runnerId || d.name).trim(),
-        name: String(d.name || d.deviceName || d.runnerId).trim(),
-        bib: d.bib ? String(d.bib).trim() : '',
-        color: typeof d.color === 'string' && d.color.trim() ? d.color.trim() : '#38bdf8',
-      }));
+      .map((d) => {
+        const runnerId = String(d.runnerId || d.deviceName || d.name).trim();
+        const defaultName = String(d.name || d.deviceName || d.runnerId).trim();
+        return {
+          runnerId,
+          deviceName: String(d.deviceName || d.runnerId || d.name).trim(),
+          name: this.customNames.get(runnerId) || defaultName,
+          bib: d.bib ? String(d.bib).trim() : '',
+          color: typeof d.color === 'string' && d.color.trim() ? d.color.trim() : '#38bdf8',
+        };
+      });
     return this.knownDevices;
+  }
+
+  getDisplayName(runnerId, fallbackName = '') {
+    const key = String(runnerId || '').trim();
+    if (key && this.customNames.has(key)) {
+      return this.customNames.get(key);
+    }
+    return fallbackName;
+  }
+
+  renameDevice(runnerId, newName) {
+    const id = String(runnerId || '').trim();
+    const name = String(newName || '').trim();
+    if (!id) {
+      throw new Error('Device ID is required.');
+    }
+    if (!name || name.length > 60) {
+      throw new Error('Name must be between 1 and 60 characters.');
+    }
+
+    this.customNames.set(id, name);
+    for (const device of this.knownDevices) {
+      if (device.runnerId === id) {
+        device.name = name;
+      }
+    }
+
+    return {
+      runnerId: id,
+      name,
+      knownDevices: this.knownDevices,
+    };
   }
 
   subscribe(fn) {

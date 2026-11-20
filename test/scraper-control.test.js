@@ -134,4 +134,16 @@ test('RunnerStore shows active devices before first ping and updates once ping a
   assert.equal(snap.runners[0].name, 'Matheus');
   assert.equal(snap.runners[0].bib, '101');
   assert.ok(snap.runners[0].distanceKm >= 1.4 && snap.runners[0].distanceKm <= 1.6);
+
+  // Renaming updates knownDevices, RunnerStore, and survives re-registration
+  ctrl.renameDevice('poco-f5', 'Matheus T.');
+  store.renameRunner('poco-f5', 'Matheus T.');
+  assert.equal(ctrl.getStatus().knownDevices[0].name, 'Matheus T.');
+  assert.equal(store.getSnapshot(1_700_000_000_000).runners[0].name, 'Matheus T.');
+
+  ctrl.setKnownDevices([
+    { runnerId: 'poco-f5', deviceName: 'POCO F5', name: 'Matheus', bib: '101', color: '#38bdf8' },
+  ]);
+  assert.equal(ctrl.getStatus().knownDevices[0].name, 'Matheus T.');
+  assert.equal(ctrl.getDisplayName('poco-f5', 'Matheus'), 'Matheus T.');
 });

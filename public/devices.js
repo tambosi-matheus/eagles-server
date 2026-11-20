@@ -15,6 +15,7 @@ let state = {
   scraperConnected: false,
 };
 let busy = false;
+let editingRunnerId = null;
 
 function showError(msg) {
   if (!msg) {
@@ -104,16 +105,42 @@ function render() {
   deviceListEl.innerHTML = known
     .map((device) => {
       const checked = isDeviceActive(device);
+      const isEditing = editingRunnerId === device.runnerId;
+      const titleBlock = isEditing
+        ? `
+          <form class="edit-name-form" data-runner-id="${escapeHtml(device.runnerId)}">
+            <input
+              type="text"
+              class="edit-name-input"
+              value="${escapeHtml(device.name)}"
+              maxlength="60"
+              aria-label="Runner name"
+              ${busy ? 'disabled' : ''}
+            />
+            <button type="submit" class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>Save</button>
+            <button type="button" class="btn btn-sm cancel-edit-btn" ${busy ? 'disabled' : ''}>Cancel</button>
+          </form>`
+        : `
+          <div class="device-title">
+            <span>${escapeHtml(device.name)}</span>
+            ${device.bib ? `<span class="device-bib">#${escapeHtml(device.bib)}</span>` : ''}
+            <button
+              type="button"
+              class="edit-name-btn"
+              data-edit-id="${escapeHtml(device.runnerId)}"
+              ${busy ? 'disabled' : ''}
+            >
+              Edit
+            </button>
+          </div>`;
+
       return `
         <div class="device-card ${checked ? 'active' : ''}">
           <div class="device-avatar" style="background:${escapeHtml(device.color)}">
             ${escapeHtml(initials(device.name))}
           </div>
           <div class="device-info">
-            <div class="device-title">
-              <span>${escapeHtml(device.name)}</span>
-              ${device.bib ? `<span class="device-bib">#${escapeHtml(device.bib)}</span>` : ''}
-            </div>
+            ${titleBlock}
             <div class="device-meta">${escapeHtml(device.deviceName)}</div>
           </div>
           <label class="switch" aria-label="Toggle tracking for ${escapeHtml(device.name)}">
@@ -135,10 +162,44 @@ function render() {
       toggleDevice(runnerId, ev.target.checked);
     });
   }
+
+  for (const btn of deviceListEl.querySelectorAll('.edit-name-btn')) {
+    btn.addEventListener('click', () => {
+      editingRunnerId = btn.dataset.editId;
+      render();
+      const input = deviceListEl.querySelector('.edit-name-input');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  }
+
+  const editForm = deviceListEl.querySelector('.edit-name-form');
+  if (editForm) {
+    const input = editForm.querySelector('.edit-name-input');
+    const cancelBtn = editForm.querySelector('.cancel-edit-btn');
+    cancelBtn?.addEventListener('click', () => {
+      editingRunnerId = null;
+      render();
+    });
+    input?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') {
+        editingRunnerId = null;
+        render();
+      }
+    });
+    editForm.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const nextName = (input?.value || '').trim();
+      if (!nextName) return;
+      saveDeviceName(editForm.dataset.runnerId, nextName);
+    });
+  }
 }
 
 async function fetchStatus() {
-  if (busy) return;
+  if (busy || editingRunnerId) return;
   try {
     const res = await fetch('/api/scraper', { cache: 'no-store' });
     if (!res.ok) throw new Error('status');
@@ -170,6 +231,33 @@ async function sendCommand(payload) {
   } catch {
     showError('Could not update tracking. Please try again.');
     await fetchStatus();
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
+async function saveDeviceName(runnerId, name) {
+  busy = true;
+  showError('');
+  render();
+
+  try {
+    const res = await fetch('/api/scraper/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runnerId, name }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error('rename_failed');
+    }
+    if (Array.isArray(data.knownDevices)) {
+      state = { ...state, knownDevices: data.knownDevices };
+    }
+    editingRunnerId = null;
+  } catch {
+    showError('Could not update the name. Please try again.');
   } finally {
     busy = false;
     render();

@@ -79,6 +79,16 @@ export class RunnerStore {
     }
   }
 
+  renameRunner(runnerId, newName) {
+    const record = this.runners.get(runnerId);
+    if (!record) return null;
+    record.name = newName;
+    const view = this._toPublicView(record, Date.now());
+    this.broadcast('runner_update', view);
+    this.broadcast('snapshot', this.getSnapshot());
+    return view;
+  }
+
   /**
    * Ingest a location update from the Google Find Hub scraper, Android phone, or simulator.
    */

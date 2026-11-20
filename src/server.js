@@ -258,6 +258,18 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // Rename a device (updates /devices, live web map, and mobile app)
+  if (req.method === 'POST' && url.pathname === '/api/scraper/rename') {
+    try {
+      const body = await readJsonBody(req);
+      const updated = scraperControl.renameDevice(body.runnerId, body.name);
+      store.renameRunner(updated.runnerId, updated.name);
+      return sendJson(res, 200, { ok: true, ...updated });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+
   // Scraper start/stop command endpoint (single endpoint for start & stop + device selection)
   if (req.method === 'POST' && url.pathname === '/api/scraper') {
     try {
@@ -316,7 +328,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readJsonBody(req);
       const pings = Array.isArray(body) ? body : Array.isArray(body.pings) ? body.pings : [body];
-      const results = pings.map((p) => store.ingestPing(p));
+      const results = pings.map((p) => {
+        const customName = scraperControl.getDisplayName(p?.runnerId, p?.name);
+        return store.ingestPing(customName ? { ...p, name: customName } : p);
+      });
       return sendJson(res, 200, { accepted: results.length, runners: results });
     } catch (err) {
       return sendJson(res, 400, { error: err.message });
