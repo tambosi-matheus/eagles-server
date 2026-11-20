@@ -38,7 +38,7 @@ btnFit.addEventListener('click', () => {
 
 btnRaw.addEventListener('click', () => {
   showRawGps = !showRawGps;
-  btnRaw.textContent = `Raw GPS: ${showRawGps ? 'On' : 'Off'}`;
+  btnRaw.textContent = `GPS Dots: ${showRawGps ? 'On' : 'Off'}`;
   btnRaw.classList.toggle('active', showRawGps);
   for (const [, rawLayer] of rawMarkers) {
     if (showRawGps) {
@@ -137,8 +137,8 @@ function renderRunnerList() {
   if (list.length === 0) {
     runnerListEl.innerHTML = `
       <div class="empty-state">
-        Waiting for runner pings…<br />
-        Start the <code>scraper</code> or run <code>npm run simulate</code>.
+        No runners on the course yet.<br />
+        Live positions will appear here as soon as tracking starts.
       </div>`;
     return;
   }
@@ -146,7 +146,7 @@ function renderRunnerList() {
   runnerListEl.innerHTML = list
     .map((r) => {
       const selectedClass = r.runnerId === selectedRunnerId ? 'selected' : '';
-      const modeTag = r.interpolated ? 'est.' : 'ping';
+      const modeTag = r.interpolated ? 'estimated' : 'live';
       const eta = formatEta(r.etaSeconds);
       return `
         <div class="runner-card ${selectedClass}" data-id="${r.runnerId}">
@@ -157,7 +157,7 @@ function renderRunnerList() {
               ${r.bib ? `<span class="runner-bib">#${r.bib}</span>` : ''}
             </div>
             <div class="runner-meta">
-              Last ping ${formatAge(r.ageSeconds)} (${modeTag}) ${eta ? `· ${eta}` : ''}
+              Updated ${formatAge(r.ageSeconds)} · ${modeTag}${eta ? ` · ${eta}` : ''}
             </div>
           </div>
           <div class="runner-stats">
