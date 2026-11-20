@@ -63,69 +63,55 @@
           </div>
         </section>
 
-        <!-- Right: Device Assignments + Upload New Map -->
-        <div class="stack">
-          <section class="panel">
-            <div class="panel-header">
-              <div>
-                <h2>Device Distance Assignment</h2>
-                <p class="muted">Assign each tracked device to a specific open map (5k, 10k, 21k…) or Default.</p>
-              </div>
+        <!-- Right: Upload New Map -->
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Add New Map</h2>
+              <p class="muted">Upload a <code>.gpx</code> or <code>.json</code> / GeoJSON route file.</p>
             </div>
-            <div id="devices-list" class="stack">
-              <div class="empty-state">Loading devices…</div>
+          </div>
+          <form id="upload-form" class="form-grid">
+            <label>
+              Map Name
+              <input id="map-name" type="text" placeholder="e.g. Curitiba Night Run 10K" required />
+            </label>
+
+            <div class="row-2">
+              <label>
+                Distance Tag
+                <input id="map-distance" type="text" placeholder="e.g. 5k, 10k, 21k" />
+              </label>
+              <label>
+                Route Color
+                <input id="map-color" type="color" value="#38bdf8" />
+              </label>
             </div>
-          </section>
 
-          <section class="panel">
-            <div class="panel-header">
-              <div>
-                <h2>Add New Map</h2>
-                <p class="muted">Upload a <code>.gpx</code> or <code>.json</code> / GeoJSON route file.</p>
-              </div>
+            <label>
+              City (optional)
+              <input id="map-city" type="text" placeholder="e.g. Curitiba" />
+            </label>
+
+            <label>
+              GPX or JSON Route File
+              <input id="map-file" type="file" accept=".gpx,.json,.geojson,application/gpx+xml,application/json" required />
+            </label>
+
+            <div class="checks-row">
+              <label class="checkbox-label">
+                <input id="map-open" type="checkbox" checked />
+                <span>Open immediately</span>
+              </label>
+              <label class="checkbox-label">
+                <input id="map-primary" type="checkbox" />
+                <span>Set as Default map</span>
+              </label>
             </div>
-            <form id="upload-form" class="form-grid">
-              <label>
-                Map Name
-                <input id="map-name" type="text" placeholder="e.g. Curitiba Night Run 10K" required />
-              </label>
 
-              <div class="row-2">
-                <label>
-                  Distance Tag
-                  <input id="map-distance" type="text" placeholder="e.g. 5k, 10k, 21k" />
-                </label>
-                <label>
-                  Route Color
-                  <input id="map-color" type="color" value="#38bdf8" />
-                </label>
-              </div>
-
-              <label>
-                City (optional)
-                <input id="map-city" type="text" placeholder="e.g. Curitiba" />
-              </label>
-
-              <label>
-                GPX or JSON Route File
-                <input id="map-file" type="file" accept=".gpx,.json,.geojson,application/gpx+xml,application/json" required />
-              </label>
-
-              <div class="checks-row">
-                <label class="checkbox-label">
-                  <input id="map-open" type="checkbox" checked />
-                  <span>Open immediately</span>
-                </label>
-                <label class="checkbox-label">
-                  <input id="map-primary" type="checkbox" />
-                  <span>Set as Default map</span>
-                </label>
-              </div>
-
-              <button id="btn-upload" class="btn btn-primary" type="submit">Add Map to Server</button>
-            </form>
-          </section>
-        </div>
+            <button id="btn-upload" class="btn btn-primary" type="submit">Add Map to Server</button>
+          </form>
+        </section>
       </div>
     </main>
 

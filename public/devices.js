@@ -15,6 +15,11 @@ let state = {
   auth: { authenticated: null, reason: null },
   scraperConnected: false,
 };
+let mapState = {
+  primaryMapId: null,
+  maps: [],
+  deviceMaps: {},
+};
 let busy = false;
 let editingRunnerId = null;
 
@@ -97,6 +102,32 @@ function renderBatteryBadge(device) {
   }
 
   return '<span class="battery-pill battery-unknown" title="Battery not reported yet">Battery --</span>';
+}
+
+function renderRouteSelect(device) {
+  const openMaps = (mapState.maps || []).filter((m) => m.open);
+  if (openMaps.length === 0) return '';
+  const primary = (mapState.maps || []).find((m) => m.isPrimary) || openMaps[0];
+  const assignedId = mapState.deviceMaps?.[device.runnerId] || '';
+
+  return `
+    <label class="device-rate-row">
+      <span>Route</span>
+      <select
+        class="interval-select route-select"
+        data-route-id="${escapeHtml(device.runnerId)}"
+        aria-label="Route for ${escapeHtml(device.name)}"
+        ${busy ? 'disabled' : ''}
+      >
+        <option value="" ${!assignedId ? 'selected' : ''}>Default (${escapeHtml(primary ? primary.distanceLabel : 'Primary')})</option>
+        ${openMaps
+          .map(
+            (m) =>
+              `<option value="${escapeHtml(m.id)}" ${assignedId === m.id ? 'selected' : ''}>${escapeHtml(m.name)} (${escapeHtml(m.distanceLabel)})</option>`
+          )
+          .join('')}
+      </select>
+    </label>`;
 }
 
 function renderIntervalSelect(device) {
@@ -213,6 +244,7 @@ function render() {
               ${renderBatteryBadge(device)}
             </div>
             ${renderIntervalSelect(device)}
+            ${renderRouteSelect(device)}
           </div>
           <label class="switch" aria-label="Toggle tracking for ${escapeHtml(device.name)}">
             <input
@@ -234,11 +266,19 @@ function render() {
     });
   }
 
-  for (const select of deviceListEl.querySelectorAll('.interval-select')) {
+  for (const select of deviceListEl.querySelectorAll('.interval-select:not(.route-select)')) {
     select.addEventListener('change', (ev) => {
       const runnerId = ev.target.dataset.intervalId;
       const intervalSeconds = Number(ev.target.value);
       saveDeviceInterval(runnerId, intervalSeconds);
+    });
+  }
+
+  for (const select of deviceListEl.querySelectorAll('.route-select')) {
+    select.addEventListener('change', (ev) => {
+      const runnerId = ev.target.dataset.routeId;
+      const mapId = ev.target.value || null;
+      saveDeviceRoute(runnerId, mapId);
     });
   }
 
@@ -280,18 +320,60 @@ function render() {
 async function fetchStatus() {
   if (busy || editingRunnerId) return;
   try {
-    const res = await fetch('/api/scraper', { cache: 'no-store' });
-    if (res.status === 401) {
+    const [scraperRes, mapsRes] = await Promise.all([
+      fetch('/api/scraper', { cache: 'no-store' }),
+      fetch('/api/maps', { cache: 'no-store' }),
+    ]);
+    if (scraperRes.status === 401 || mapsRes.status === 401) {
       window.location.href = '/login?next=/devices';
       return;
     }
-    if (!res.ok) throw new Error('status');
-    const data = await res.json();
+    if (!scraperRes.ok) throw new Error('status');
+    const data = await scraperRes.json();
     state = data;
+    if (mapsRes.ok) {
+      const mData = await mapsRes.json();
+      mapState = {
+        primaryMapId: mData.primaryMapId || null,
+        maps: mData.maps || [],
+        deviceMaps: mData.deviceMaps || {},
+      };
+    }
     showError('');
     render();
   } catch {
     showError('Unable to connect right now. Retrying…');
+  }
+}
+
+async function saveDeviceRoute(runnerId, mapId) {
+  busy = true;
+  showError('');
+  render();
+  try {
+    const res = await fetch('/api/maps/assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runnerId, mapId }),
+    });
+    if (res.status === 401) {
+      window.location.href = '/login?next=/devices';
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Could not update device route.');
+    }
+    mapState = {
+      primaryMapId: data.primaryMapId || mapState.primaryMapId,
+      maps: data.maps || mapState.maps,
+      deviceMaps: data.deviceMaps || {},
+    };
+  } catch (err) {
+    showError(err.message || 'Could not update device route.');
+  } finally {
+    busy = false;
+    render();
   }
 }
 

@@ -2,7 +2,6 @@
 const openCountBadge = document.getElementById('open-count-badge');
 const alertBox = document.getElementById('alert-box');
 const mapsListEl = document.getElementById('maps-list');
-const devicesListEl = document.getElementById('devices-list');
 const btnFitPreview = document.getElementById('btn-fit-preview');
 const btnLogout = document.getElementById('btn-logout');
 
@@ -180,58 +179,6 @@ function renderMapsList(state) {
   }
 }
 
-function renderDevicesList(state) {
-  const devices = state.knownDevices || [];
-  const openMaps = (state.maps || []).filter((m) => m.open);
-  const primary = (state.maps || []).find((m) => m.isPrimary);
-
-  if (devices.length === 0) {
-    devicesListEl.innerHTML =
-      '<div class="empty-state">No devices reported by scraper yet. Once devices appear on /devices, you can assign each one to 5k, 10k, 21k, etc.</div>';
-    return;
-  }
-
-  devicesListEl.innerHTML = devices
-    .map((d) => {
-      const assignedId = state.deviceMaps?.[d.runnerId] || '';
-      const options = [
-        `<option value="">Default (${escapeHtml(primary ? primary.distanceLabel : 'Primary')})</option>`,
-        ...openMaps.map(
-          (m) =>
-            `<option value="${escapeHtml(m.id)}" ${assignedId === m.id ? 'selected' : ''}>${escapeHtml(
-              m.name
-            )} (${escapeHtml(m.distanceLabel)})</option>`
-        ),
-      ].join('');
-      return `
-        <div class="device-row">
-          <div>
-            <div class="device-name">${escapeHtml(d.name)}</div>
-            <div class="device-id">${escapeHtml(d.runnerId)}</div>
-          </div>
-          <select data-runner-id="${escapeHtml(d.runnerId)}">${options}</select>
-        </div>
-      `;
-    })
-    .join('');
-
-  for (const sel of devicesListEl.querySelectorAll('select[data-runner-id]')) {
-    sel.addEventListener('change', async () => {
-      clearAlert();
-      try {
-        await apiPost('/api/maps/assign', {
-          runnerId: sel.dataset.runnerId,
-          mapId: sel.value || null,
-        });
-        showAlert('Device map assignment saved.');
-        await loadState();
-      } catch (err) {
-        showAlert(err.message, 'error');
-      }
-    });
-  }
-}
-
 async function loadState() {
   const res = await fetch('/api/maps', { cache: 'no-store' });
   if (res.status === 401) {
@@ -242,7 +189,6 @@ async function loadState() {
   currentState = data;
   renderPreview(data.openMaps);
   renderMapsList(data);
-  renderDevicesList(data);
 }
 
 uploadForm.addEventListener('submit', async (ev) => {
