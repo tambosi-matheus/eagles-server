@@ -7,6 +7,9 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
+import { createLogger } from './logger.js';
+
+const log = createLogger('PasskeyManager');
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const ADMIN_USER_ID = new Uint8Array(Buffer.from('eagles-run-club-admin', 'utf8'));
@@ -34,7 +37,7 @@ export class PasskeyManager {
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed.credentials) ? parsed.credentials : [];
     } catch (err) {
-      console.warn(`WARNING: Could not load passkeys from ${this.storeFile}: ${err.message}`);
+      log.warn('_loadCredentials', 'Could not load passkeys', { file: this.storeFile, error: err.message });
       return [];
     }
   }

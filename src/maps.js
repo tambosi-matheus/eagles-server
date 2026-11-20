@@ -2,6 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildRouteModel, loadRoute, parseGpx } from './gpx-matcher.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('MapManager');
 
 const MAP_COLORS = ['#ff4d00', '#38bdf8', '#22c55e', '#a855f7', '#eab308', '#f43f5e'];
 
@@ -86,7 +89,7 @@ export class MapManager {
           }
         }
       } catch (err) {
-        console.warn(`WARNING: Could not load maps registry: ${err.message}`);
+        log.warn('_load', 'Could not load maps registry', { error: err.message });
       }
     }
 

@@ -8,6 +8,9 @@ import { MapManager } from './maps.js';
 import { PasskeyManager } from './passkeys.js';
 import { RunnerStore } from './store.js';
 import { ScraperController } from './scraper-control.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('server');
 import {
   buildClearSessionCookie,
   buildSecurityHeaders,
@@ -818,11 +821,14 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(PORT, HOST, () => {
   const primary = mapManager.getPrimaryMap();
-  console.log(`Marathon Tracker backend running at http://localhost:${PORT}`);
-  console.log(
-    `Loaded primary route: ${primary.name} (${(primary.totalMeters / 1000).toFixed(2)} km, ${primary.points.length} waypoints; ${mapManager.getOpenMaps().length} open map(s))`
-  );
-  if (!API_KEY) console.warn('WARNING: INGEST_API_KEY is not set.');
-  if (!APP_API_TOKEN) console.warn('WARNING: APP_API_TOKEN is not set (mobile app API calls will be rejected).');
-  if (!ADMIN_PASSWORD) console.warn('WARNING: ADMIN_PASSWORD is not set (web login disabled).');
+  log.info(null, 'Server listening', { host: HOST, port: PORT });
+  log.info(null, 'Loaded primary route', {
+    route: primary.name,
+    totalKm: (primary.totalMeters / 1000).toFixed(2),
+    waypoints: primary.points.length,
+    openMaps: mapManager.getOpenMaps().length,
+  });
+  if (!API_KEY) log.warn(null, 'INGEST_API_KEY is not set');
+  if (!APP_API_TOKEN) log.warn(null, 'APP_API_TOKEN is not set; mobile app API calls will be rejected');
+  if (!ADMIN_PASSWORD) log.warn(null, 'ADMIN_PASSWORD is not set; web login disabled');
 });
