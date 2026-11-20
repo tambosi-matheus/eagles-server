@@ -39,6 +39,23 @@
 
       <div id="alert-box" class="alert hidden" role="alert"></div>
 
+      <section id="route-session-card" class="route-session-card">
+        <div class="route-session-info">
+          <strong id="route-session-title">Route Not Started</strong>
+          <span id="route-session-sub" class="muted">
+            Press Begin Tracking when the run starts to track distance from 0 km
+          </span>
+        </div>
+        <div class="route-session-actions">
+          <button id="btn-begin-route" class="btn btn-begin" type="button" disabled>
+            Begin Tracking
+          </button>
+          <button id="btn-end-route" class="btn btn-danger hidden" type="button" disabled>
+            End Route
+          </button>
+        </div>
+      </section>
+
       <section class="summary-bar">
         <div class="summary-text">
           <strong id="status-summary">Paused</strong>

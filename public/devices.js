@@ -1,6 +1,11 @@
 const statusBadgeEl = document.getElementById('status-badge');
 const authWarningEl = document.getElementById('auth-warning');
 const alertBoxEl = document.getElementById('alert-box');
+const routeSessionCardEl = document.getElementById('route-session-card');
+const routeSessionTitleEl = document.getElementById('route-session-title');
+const routeSessionSubEl = document.getElementById('route-session-sub');
+const btnBeginRoute = document.getElementById('btn-begin-route');
+const btnEndRoute = document.getElementById('btn-end-route');
 const statusSummaryEl = document.getElementById('status-summary');
 const statusSubEl = document.getElementById('status-sub');
 const btnStartAll = document.getElementById('btn-start-all');
@@ -13,6 +18,7 @@ let state = {
   devices: [],
   knownDevices: [],
   auth: { authenticated: null, reason: null },
+  routeSession: { started: false, startedAt: null, elapsedSeconds: 0 },
   scraperConnected: false,
 };
 let mapState = {
@@ -156,7 +162,41 @@ function renderIntervalSelect(device) {
     </label>`;
 }
 
+function formatClock(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  return [hrs, mins, secs].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
+function updateRouteSessionClock() {
+  const session = state.routeSession || { started: false, startedAt: null };
+  if (session.started && session.startedAt) {
+    const elapsed = Math.max(0, Math.floor((Date.now() - session.startedAt) / 1000));
+    routeSessionTitleEl.textContent = `Route Started · ${formatClock(elapsed)}`;
+  }
+}
+
 function render() {
+  const session = state.routeSession || { started: false, startedAt: null };
+  routeSessionCardEl.classList.toggle('started', Boolean(session.started));
+  if (session.started && session.startedAt) {
+    updateRouteSessionClock();
+    routeSessionSubEl.textContent =
+      'Tracking distance traveled along the route from 0 km (including out-and-back overlaps)';
+    btnBeginRoute.classList.add('hidden');
+    btnEndRoute.classList.remove('hidden');
+    btnEndRoute.disabled = busy;
+  } else {
+    routeSessionTitleEl.textContent = 'Route Not Started';
+    routeSessionSubEl.textContent =
+      'Press Begin Tracking when the run starts to track distance from 0 km';
+    btnBeginRoute.classList.remove('hidden');
+    btnEndRoute.classList.add('hidden');
+    btnBeginRoute.disabled = busy || (state.knownDevices || []).length === 0;
+  }
+
   const authBroken = state.scraperConnected && state.auth && state.auth.authenticated === false;
   authWarningEl.classList.toggle('hidden', !authBroken);
 
@@ -483,6 +523,42 @@ btnStartAll.addEventListener('click', () => {
 btnStopAll.addEventListener('click', () => {
   sendCommand({ action: 'stop' });
 });
+
+async function sendRouteSessionCommand(action) {
+  busy = true;
+  showError('');
+  render();
+  try {
+    const res = await fetch('/api/tracking', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    if (res.status === 401) {
+      window.location.href = '/login?next=/devices';
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'tracking_failed');
+    state = { ...state, ...data };
+  } catch {
+    showError('Could not update route tracking. Please try again.');
+    await fetchStatus();
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
+btnBeginRoute?.addEventListener('click', () => {
+  sendRouteSessionCommand('start');
+});
+
+btnEndRoute?.addEventListener('click', () => {
+  sendRouteSessionCommand('stop');
+});
+
+setInterval(updateRouteSessionClock, 1000);
 
 btnLogout?.addEventListener('click', async () => {
   await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});

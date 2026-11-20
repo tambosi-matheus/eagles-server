@@ -6,6 +6,32 @@ export function toRad(deg) {
   return (deg * Math.PI) / 180;
 }
 
+export function toDeg(rad) {
+  return (rad * 180) / Math.PI;
+}
+
+/**
+ * Initial compass bearing in degrees [0, 360) from point 1 to point 2.
+ */
+export function bearingDegrees(lat1, lon1, lat2, lon2) {
+  const phi1 = toRad(lat1);
+  const phi2 = toRad(lat2);
+  const dLon = toRad(lon2 - lon1);
+  const y = Math.sin(dLon) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+/**
+ * Smallest unsigned angle difference in degrees [0, 180].
+ */
+export function angularDiffDegrees(a, b) {
+  const diff = Math.abs(((a - b + 540) % 360) - 180);
+  return diff;
+}
+
 /**
  * Great-circle distance in meters between two WGS84 points.
  */
@@ -64,10 +90,12 @@ export function buildRouteModel({ name, city = '', points }) {
   }
 
   const cumulativeMeters = [0];
+  const segmentBearings = [];
   for (let i = 1; i < points.length; i++) {
     const [lat1, lon1] = points[i - 1];
     const [lat2, lon2] = points[i];
     cumulativeMeters.push(cumulativeMeters[i - 1] + haversineMeters(lat1, lon1, lat2, lon2));
+    segmentBearings.push(bearingDegrees(lat1, lon1, lat2, lon2));
   }
 
   return {
@@ -75,6 +103,7 @@ export function buildRouteModel({ name, city = '', points }) {
     city,
     points,
     cumulativeMeters,
+    segmentBearings,
     totalMeters: cumulativeMeters[cumulativeMeters.length - 1],
   };
 }
@@ -108,10 +137,79 @@ function projectOntoSegment(lat, lon, aLat, aLon, bLat, bLon) {
 }
 
 /**
- * Snap a raw (lat, lon) GPS coordinate onto the marathon route.
- *
- * Uses a forward search window around `lastDistanceMeters` when available so
- * loops and out-and-back overlapping segments don't jump the runner backward.
+ * Find distinct candidate projections along the route for a raw GPS point.
+ * Adjacent segments within `clusterMeters` are collapsed to their best projection
+ * while overlapping legs (e.g. out-and-back at 2km and 8km) are kept separate.
+ */
+export function findRouteCandidates(
+  route,
+  lat,
+  lon,
+  { maxSnapDistanceMeters = 250, clusterMeters = 45 } = {}
+) {
+  const raw = [];
+  let closestOverall = null;
+
+  for (let i = 0; i < route.points.length - 1; i++) {
+    const segStartM = route.cumulativeMeters[i];
+    const segEndM = route.cumulativeMeters[i + 1];
+    const [aLat, aLon] = route.points[i];
+    const [bLat, bLon] = route.points[i + 1];
+    const proj = projectOntoSegment(lat, lon, aLat, aLon, bLat, bLon);
+    const distanceMeters = segStartM + proj.t * (segEndM - segStartM);
+    const bearing =
+      route.segmentBearings?.[i] ?? bearingDegrees(aLat, aLon, bLat, bLon);
+
+    const cand = {
+      lat: proj.lat,
+      lon: proj.lon,
+      distanceMeters,
+      crossTrackMeters: proj.crossTrackMeters,
+      onCourse: proj.crossTrackMeters <= maxSnapDistanceMeters,
+      bearing,
+    };
+
+    if (!closestOverall || cand.crossTrackMeters < closestOverall.crossTrackMeters) {
+      closestOverall = cand;
+    }
+    if (cand.onCourse) {
+      raw.push(cand);
+    }
+  }
+
+  if (raw.length === 0) {
+    return closestOverall ? [closestOverall] : [];
+  }
+
+  // Collapse consecutive nearby projections along the same pass into the closest one
+  raw.sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const clusters = [];
+  for (const cand of raw) {
+    const prev = clusters[clusters.length - 1];
+    if (
+      prev &&
+      cand.distanceMeters - prev.distanceMeters <= clusterMeters &&
+      angularDiffDegrees(cand.bearing, prev.bearing) < 60
+    ) {
+      if (cand.crossTrackMeters < prev.crossTrackMeters) {
+        clusters[clusters.length - 1] = cand;
+      }
+    } else {
+      clusters.push(cand);
+    }
+  }
+
+  return clusters;
+}
+
+/**
+ * Snap a raw (lat, lon) GPS coordinate onto the marathon route using an online
+ * HMM / Viterbi scorer that combines:
+ *  1. Spatial cross-track emission probability
+ *  2. GPS movement heading vs. directed route segment bearing (disambiguates out-and-back streets)
+ *  3. Velocity-predicted distance along the route + physical max-speed bounds
+ *  4. Newson-Krumm route-delta vs. haversine-move consistency
+ *  5. Elapsed time since "route started" (prevents first-ping jumps onto return legs)
  */
 export function snapToRoute(
   route,
@@ -120,73 +218,156 @@ export function snapToRoute(
   {
     lastDistanceMeters = null,
     elapsedSeconds = null,
+    prevRawLat = null,
+    prevRawLon = null,
+    expectedSpeedMps = null,
+    elapsedSinceRouteStartSeconds = null,
+    viterbiStates = null,
     maxSnapDistanceMeters = 250,
-    maxSpeedMps = 7.5, // ~27 km/h generous upper bound for marathon runners
+    maxSpeedMps = 7.0, // ~25.2 km/h generous upper bound for runners
   } = {}
 ) {
-  let minWindow = 0;
-  let maxWindow = route.totalMeters;
-
-  if (lastDistanceMeters !== null && elapsedSeconds !== null && elapsedSeconds >= 0) {
-    // Allow small backward tolerance (120m) for GPS jitter and generous forward window.
-    minWindow = Math.max(0, lastDistanceMeters - 120);
-    maxWindow = Math.min(
-      route.totalMeters,
-      lastDistanceMeters + Math.max(400, elapsedSeconds * maxSpeedMps + 250)
-    );
-  }
-
-  let best = null;
-
-  for (let i = 0; i < route.points.length - 1; i++) {
-    const segStartM = route.cumulativeMeters[i];
-    const segEndM = route.cumulativeMeters[i + 1];
-
-    // Skip segments completely outside the forward search window
-    if (segEndM < minWindow || segStartM > maxWindow) {
-      continue;
-    }
-
-    const [aLat, aLon] = route.points[i];
-    const [bLat, bLon] = route.points[i + 1];
-    const proj = projectOntoSegment(lat, lon, aLat, aLon, bLat, bLon);
-    const distanceAlongRoute = segStartM + proj.t * (segEndM - segStartM);
-
-    if (distanceAlongRoute < minWindow || distanceAlongRoute > maxWindow) {
-      continue;
-    }
-
-    if (!best || proj.crossTrackMeters < best.crossTrackMeters) {
-      best = {
-        lat: proj.lat,
-        lon: proj.lon,
-        distanceMeters: distanceAlongRoute,
-        crossTrackMeters: proj.crossTrackMeters,
-        onCourse: proj.crossTrackMeters <= maxSnapDistanceMeters,
-      };
-    }
-  }
-
-  // If the windowed search didn't find an on-course match, fall back to full route search
-  if (!best && lastDistanceMeters !== null) {
-    return snapToRoute(route, lat, lon, {
-      lastDistanceMeters: null,
-      elapsedSeconds: null,
-      maxSnapDistanceMeters,
-    });
-  }
-
-  if (!best) {
+  const candidates = findRouteCandidates(route, lat, lon, { maxSnapDistanceMeters });
+  if (candidates.length === 0) {
     return {
       lat,
       lon,
       distanceMeters: lastDistanceMeters ?? 0,
       crossTrackMeters: Infinity,
       onCourse: false,
+      bearing: null,
+      viterbiStates: viterbiStates || [],
     };
   }
 
-  return best;
+  const hasPrevRaw = Number.isFinite(prevRawLat) && Number.isFinite(prevRawLon);
+  const rawMoveMeters = hasPrevRaw ? haversineMeters(prevRawLat, prevRawLon, lat, lon) : null;
+  const gpsBearing =
+    hasPrevRaw && rawMoveMeters >= 25 ? bearingDegrees(prevRawLat, prevRawLon, lat, lon) : null;
+
+  // Build prior states from Viterbi trellis, or seed from lastDistanceMeters
+  let priorStates = Array.isArray(viterbiStates) && viterbiStates.length > 0 ? viterbiStates : null;
+  if (!priorStates && lastDistanceMeters !== null) {
+    priorStates = [{ distanceMeters: lastDistanceMeters, logProb: 0 }];
+  }
+
+  const SIGMA_Z = 35; // GPS cross-track noise std dev (meters)
+  const NK_BETA = 120; // Newson-Krumm exponential scale (meters)
+  const vExp =
+    Number.isFinite(expectedSpeedMps) && expectedSpeedMps > 0.4 ? expectedSpeedMps : 3.0;
+
+  const scored = candidates.map((cand) => {
+    // 1. Spatial cross-track emission
+    let emission = -((cand.crossTrackMeters * cand.crossTrackMeters) / (2 * SIGMA_Z * SIGMA_Z));
+    emission = Math.max(-20, emission);
+
+    // 2. Heading alignment emission (critical for overlapping out-and-back streets)
+    if (gpsBearing !== null && Number.isFinite(cand.bearing)) {
+      const angleDiff = angularDiffDegrees(gpsBearing, cand.bearing);
+      emission -= 4.5 * (1 - Math.cos(toRad(angleDiff)));
+    }
+
+    // 3. Route-started time-from-zero physical bound
+    if (
+      elapsedSinceRouteStartSeconds !== null &&
+      Number.isFinite(elapsedSinceRouteStartSeconds) &&
+      elapsedSinceRouteStartSeconds >= 0
+    ) {
+      const maxFromStart = Math.max(400, elapsedSinceRouteStartSeconds * maxSpeedMps + 250);
+      if (cand.distanceMeters > maxFromStart) {
+        emission -= 25 + (cand.distanceMeters - maxFromStart) / 50;
+      } else if (!priorStates) {
+        // On first ping after route start, gently prefer distance consistent with elapsed time
+        const expectedFromStart = elapsedSinceRouteStartSeconds * vExp;
+        const sigmaStart = Math.max(300, 2.2 * elapsedSinceRouteStartSeconds);
+        const startPenalty = Math.min(
+          8,
+          ((cand.distanceMeters - expectedFromStart) ** 2) / (2 * sigmaStart * sigmaStart)
+        );
+        emission -= startPenalty;
+      }
+    }
+
+    // 4. Viterbi transition from previous states
+    let bestTransition = 0;
+    if (priorStates && elapsedSeconds !== null && Number.isFinite(elapsedSeconds) && elapsedSeconds >= 0) {
+      bestTransition = -Infinity;
+      const maxReach = Math.max(350, elapsedSeconds * maxSpeedMps + 200);
+      const sigmaV = Math.max(120, 0.9 * elapsedSeconds);
+
+      for (const prev of priorStates) {
+        const deltaRoute = cand.distanceMeters - prev.distanceMeters;
+        let trans = prev.logProb;
+
+        // Backward jump penalty
+        if (deltaRoute < -120) {
+          trans -= 30 + Math.abs(deltaRoute) / 40;
+        } else if (deltaRoute < 0) {
+          trans -= Math.abs(deltaRoute) / 60;
+        }
+
+        // Physical max-speed forward bound
+        if (deltaRoute > maxReach) {
+          trans -= 30 + (deltaRoute - maxReach) / 50;
+        }
+
+        // Velocity-predicted position along route
+        const predicted = prev.distanceMeters + vExp * elapsedSeconds;
+        const velPenalty = Math.min(
+          12,
+          ((cand.distanceMeters - predicted) ** 2) / (2 * sigmaV * sigmaV)
+        );
+        trans -= velPenalty;
+
+        // Turnaround-safe geometric consistency: compare observed straight-line GPS move
+        // against the route's own straight-line chord between prev and cand (handles U-turns cleanly)
+        if (rawMoveMeters !== null) {
+          const prevPt = pointAtDistance(route, prev.distanceMeters);
+          const expectedChordMeters = haversineMeters(prevPt.lat, prevPt.lon, cand.lat, cand.lon);
+          const chordPenalty = Math.min(8, Math.abs(expectedChordMeters - rawMoveMeters) / NK_BETA);
+          trans -= chordPenalty;
+        }
+
+        if (trans > bestTransition) {
+          bestTransition = trans;
+        }
+      }
+    } else if (priorStates) {
+      // No elapsed time known: prefer continuity near prior states
+      bestTransition = -Infinity;
+      for (const prev of priorStates) {
+        const deltaRoute = cand.distanceMeters - prev.distanceMeters;
+        const penalty = deltaRoute < -120 ? 30 + Math.abs(deltaRoute) / 40 : Math.abs(deltaRoute) / 200;
+        const trans = prev.logProb - penalty;
+        if (trans > bestTransition) bestTransition = trans;
+      }
+    }
+
+    return {
+      ...cand,
+      logProb: bestTransition + emission,
+    };
+  });
+
+  scored.sort((a, b) => b.logProb - a.logProb);
+  const best = scored[0];
+
+  // Normalize top K=6 Viterbi states to prevent numeric underflow
+  const topStates = scored.slice(0, 6).map((s) => ({
+    distanceMeters: s.distanceMeters,
+    logProb: Math.max(-50, s.logProb - best.logProb),
+    bearing: s.bearing,
+  }));
+
+  return {
+    lat: best.lat,
+    lon: best.lon,
+    distanceMeters: best.distanceMeters,
+    crossTrackMeters: best.crossTrackMeters,
+    onCourse: best.onCourse,
+    bearing: best.bearing,
+    viterbiStates: topStates,
+  };
 }
 
 /**

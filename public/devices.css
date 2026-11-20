@@ -167,6 +167,47 @@ body {
   display: none !important;
 }
 
+.route-session-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.route-session-card.started {
+  border-color: rgba(34, 197, 94, 0.55);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.route-session-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 180px;
+}
+
+.route-session-info strong {
+  font-size: 15px;
+}
+
+.route-session-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-begin {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #0a0a0a;
+  font-weight: 700;
+}
+
 .summary-bar {
   display: flex;
   align-items: center;

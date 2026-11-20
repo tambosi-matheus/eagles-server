@@ -83,3 +83,49 @@ test('RunnerStore computes rolling pace and interpolates between delayed tag pin
   assert.ok(snap.runners[0].distanceKm >= 1.4 && snap.runners[0].distanceKm <= 1.5);
   assert.ok(snap.runners[0].paceSecPerKm >= 325 && snap.runners[0].paceSecPerKm <= 345);
 });
+
+test('10K out-and-back overlapping street: Begin Tracking + HMM/Viterbi + heading + velocity tracks 0->5k->10k accurately', () => {
+  // Exact 10 km out-and-back on the exact same North-South street:
+  // 0 km at (0, 0) -> 5 km North at (~0.044966, 0) -> 10 km back at (0, 0)
+  const route = buildRouteModel({
+    name: '10K Out-and-Back',
+    points: [
+      [0, 0],
+      [0.015, 0],
+      [0.030, 0],
+      [0.044966, 0], // ~5.0 km turnaround
+      [0.030, 0],
+      [0.015, 0],
+      [0, 0], // ~10.0 km finish
+    ],
+  });
+
+  const store = new RunnerStore(route);
+  const t0 = 1_700_000_000_000;
+  store.syncActiveDevices([{ runnerId: 'r1', name: 'Matheus', bib: '101', color: '#38bdf8' }]);
+  store.startRouteTracking(t0);
+
+  // Runner runs at 3.33 m/s (5:00/km = 300s per km)
+  const paceSecPerKm = 300;
+  const trueDistancesKm = [0.6, 1.8, 3.2, 4.6, 5.4, 6.8, 8.2, 9.4];
+
+  for (const km of trueDistancesKm) {
+    const pt = pointAtDistance(route, km * 1000);
+    const ts = t0 + km * paceSecPerKm * 1000;
+    const view = store.ingestPing({
+      runnerId: 'r1',
+      name: 'Matheus',
+      lat: pt.lat,
+      lon: pt.lon + 0.00005, // ~5m GPS noise
+      timestamp: ts,
+    });
+    assert.ok(
+      Math.abs(view.lastVerifiedKm - km) < 0.25,
+      `At true ${km} km, expected snapped near ${km} km, got ${view.lastVerifiedKm} km`
+    );
+  }
+
+  const finalSnap = store.getSnapshot(t0 + 9.4 * paceSecPerKm * 1000);
+  assert.equal(finalSnap.routeSession.started, true);
+  assert.ok(finalSnap.runners[0].traveledKm >= 9.2 && finalSnap.runners[0].traveledKm <= 9.6);
+});

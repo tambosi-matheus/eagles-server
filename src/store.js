@@ -1,4 +1,4 @@
-import { pointAtDistance, snapToRoute } from './gpx-matcher.js';
+import { haversineMeters, pointAtDistance, snapToRoute } from './gpx-matcher.js';
 
 const DEFAULT_COLORS = ['#38bdf8', '#f97316', '#22c55e', '#a855f7', '#f43f5e', '#eab308'];
 const MAX_EXTRAPOLATION_SECONDS = 600; // Stop extrapolating if no ping for > 10 minutes
@@ -15,6 +15,59 @@ export class RunnerStore {
     }
     this.runners = new Map();
     this.listeners = new Set();
+    this.routeSession = {
+      started: false,
+      startedAt: null,
+    };
+  }
+
+  getRouteSession(nowMs = Date.now()) {
+    return {
+      started: this.routeSession.started,
+      startedAt: this.routeSession.startedAt,
+      elapsedSeconds:
+        this.routeSession.started && this.routeSession.startedAt != null
+          ? Math.max(0, Math.floor((nowMs - this.routeSession.startedAt) / 1000))
+          : 0,
+    };
+  }
+
+  /**
+   * Mark the route as started ("Begin Tracking"). Resets every runner's route
+   * distance and Viterbi state to 0m at `startedAt` so overlapping outbound/inbound
+   * streets are disambiguated from the start line.
+   */
+  startRouteTracking(startedAt = Date.now()) {
+    this.routeSession = {
+      started: true,
+      startedAt,
+    };
+    for (const record of this.runners.values()) {
+      record.hasLocation = false;
+      record.rawLat = null;
+      record.rawLon = null;
+      record.snappedLat = null;
+      record.snappedLon = null;
+      record.distanceMeters = 0;
+      record.traveledMeters = 0;
+      record.crossTrackMeters = null;
+      record.onCourse = false;
+      record.speedMps = null;
+      record.lastPingAt = null;
+      record.history = [];
+      record.viterbiStates = [{ distanceMeters: 0, logProb: 0 }];
+    }
+    this.broadcast('snapshot', this.getSnapshot());
+    return this.getRouteSession();
+  }
+
+  stopRouteTracking() {
+    this.routeSession = {
+      started: false,
+      startedAt: null,
+    };
+    this.broadcast('snapshot', this.getSnapshot());
+    return this.getRouteSession();
   }
 
   getRouteForRunner(runnerId) {
@@ -97,11 +150,15 @@ export class RunnerStore {
           snappedLat: null,
           snappedLon: null,
           distanceMeters: 0,
+          traveledMeters: 0,
           crossTrackMeters: null,
           onCourse: false,
           speedMps: null,
           lastPingAt: null,
           history: [],
+          viterbiStates: this.routeSession.started
+            ? [{ distanceMeters: 0, logProb: 0 }]
+            : null,
         });
         changed = true;
       }
@@ -161,10 +218,22 @@ export class RunnerStore {
         ? (pingMs - existing.lastPingAt) / 1000
         : null;
 
+    const elapsedSinceRouteStartSeconds =
+      this.routeSession.started &&
+      this.routeSession.startedAt != null &&
+      pingMs >= this.routeSession.startedAt
+        ? (pingMs - this.routeSession.startedAt) / 1000
+        : null;
+
     const runnerRoute = this.getRouteForRunner(runnerId);
     const snapped = snapToRoute(runnerRoute, lat, lon, {
       lastDistanceMeters: existing?.onCourse ? existing.distanceMeters : null,
       elapsedSeconds: elapsedSec,
+      prevRawLat: existing?.hasLocation ? existing.rawLat : null,
+      prevRawLon: existing?.hasLocation ? existing.rawLon : null,
+      expectedSpeedMps: existing?.speedMps ?? null,
+      elapsedSinceRouteStartSeconds,
+      viterbiStates: existing?.viterbiStates ?? null,
     });
 
     const history = existing ? [...existing.history] : [];
@@ -182,6 +251,18 @@ export class RunnerStore {
     // Compute rolling speed (m/s) over recent on-course history (~last 3-10 minutes)
     const speedMps = this._computeRollingSpeed(history, existing?.speedMps ?? null);
 
+    // Compute cumulative distance traveled since route started
+    let traveledMeters = existing?.traveledMeters || 0;
+    if (snapped.onCourse) {
+      traveledMeters = Math.max(traveledMeters, snapped.distanceMeters);
+    } else if (existing?.hasLocation && Number.isFinite(existing.rawLat) && Number.isFinite(existing.rawLon)) {
+      const stepMeters = haversineMeters(existing.rawLat, existing.rawLon, lat, lon);
+      const maxStep = elapsedSec != null ? Math.max(100, elapsedSec * 7.5 + 50) : 500;
+      if (stepMeters >= 10 && stepMeters <= maxStep) {
+        traveledMeters += stepMeters;
+      }
+    }
+
     const record = {
       runnerId,
       name: name || existing?.name || runnerId,
@@ -195,11 +276,13 @@ export class RunnerStore {
       snappedLat: snapped.lat,
       snappedLon: snapped.lon,
       distanceMeters: snapped.distanceMeters,
+      traveledMeters,
       crossTrackMeters: Math.round(snapped.crossTrackMeters),
       onCourse: snapped.onCourse,
       speedMps,
       lastPingAt: pingMs,
       history,
+      viterbiStates: snapped.viterbiStates,
     };
 
     this.runners.set(runnerId, record);
@@ -267,6 +350,7 @@ export class RunnerStore {
         onCourse: false,
         crossTrackMeters: null,
         distanceKm: null,
+        traveledKm: 0,
         lastVerifiedKm: null,
         progressPct: 0,
         speedMps: null,
@@ -324,6 +408,7 @@ export class RunnerStore {
       onCourse: record.onCourse,
       crossTrackMeters: record.crossTrackMeters,
       distanceKm: Number((estimatedDistanceMeters / 1000).toFixed(2)),
+      traveledKm: Number((Math.max(record.traveledMeters || 0, estimatedDistanceMeters) / 1000).toFixed(2)),
       lastVerifiedKm: Number((record.distanceMeters / 1000).toFixed(2)),
       progressPct: Number(
         Math.min(100, (estimatedDistanceMeters / runnerRoute.totalMeters) * 100).toFixed(1)
@@ -351,6 +436,7 @@ export class RunnerStore {
     });
     return {
       serverTime: nowMs,
+      routeSession: this.getRouteSession(nowMs),
       route: {
         id: primaryRoute.id || null,
         name: primaryRoute.name,

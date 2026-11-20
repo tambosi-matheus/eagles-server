@@ -633,7 +633,54 @@ const server = http.createServer(async (req, res) => {
     if (!canControlAdmin(req)) {
       return sendJson(req, res, 401, { error: 'Unauthorized' });
     }
-    return sendJson(req, res, 200, scraperControl.getStatus());
+    return sendJson(req, res, 200, {
+      ...scraperControl.getStatus(),
+      routeSession: store.getRouteSession(),
+    });
+  }
+
+  // Begin / End Route Tracking session (resets distance to 0m at start time for overlap disambiguation)
+  if (req.method === 'POST' && url.pathname === '/api/tracking') {
+    if (!canControlAdmin(req)) {
+      return sendJson(req, res, 401, { error: 'Unauthorized' });
+    }
+    try {
+      const body = await readJsonBody(req);
+      const action = typeof body.action === 'string' ? body.action.trim().toLowerCase() : '';
+      if (action !== 'start' && action !== 'stop') {
+        return sendJson(req, res, 400, { error: 'Invalid action: expected "start" or "stop".' });
+      }
+
+      if (action === 'start') {
+        // If no devices are active yet, activate all known devices so tracking begins immediately
+        const status = scraperControl.getStatus();
+        if (!status.active && status.knownDevices.length > 0) {
+          const allIds = status.knownDevices.map((d) => d.runnerId);
+          scraperControl.handleCommand({ action: 'start', devices: allIds });
+          store.syncActiveDevices(scraperControl.getActiveDevices());
+        }
+        const routeSession = store.startRouteTracking(Date.now());
+        log.info('POST /api/tracking', 'Route tracking started', {
+          startedAt: routeSession.startedAt,
+          activeDevices: scraperControl.getActiveDevices().length,
+        });
+        return sendJson(req, res, 200, {
+          ok: true,
+          ...scraperControl.getStatus(),
+          routeSession,
+        });
+      }
+
+      const routeSession = store.stopRouteTracking();
+      log.info('POST /api/tracking', 'Route tracking ended');
+      return sendJson(req, res, 200, {
+        ok: true,
+        ...scraperControl.getStatus(),
+        routeSession,
+      });
+    } catch (err) {
+      return sendJson(req, res, 400, { error: err.message });
+    }
   }
 
   // Report scraper Google authentication status (Scraper-only X-API-Key)
