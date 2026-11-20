@@ -1,4 +1,5 @@
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,9 @@ const ROUTE_FILE =
   process.env.ROUTE_FILE || path.resolve(__dirname, '../data/curitiba-route.json');
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
 const API_KEY = process.env.INGEST_API_KEY || '';
+const SCRAPER_NOVNC_HOST = process.env.SCRAPER_NOVNC_HOST || 'eagles-scrapper';
+const SCRAPER_NOVNC_PORT = Number(process.env.SCRAPER_NOVNC_PORT || 6080);
+const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -90,6 +94,62 @@ function serveStatic(reqPath, res) {
   });
 }
 
+function checkOptionalBasicAuth(req, res) {
+  if (!AUTH_PASSWORD) return true;
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Basic ')) {
+    const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8');
+    const sep = decoded.indexOf(':');
+    const pass = sep >= 0 ? decoded.slice(sep + 1) : decoded;
+    if (pass === AUTH_PASSWORD) return true;
+  }
+  res.writeHead(401, {
+    'WWW-Authenticate': 'Basic realm="Eagles Auth"',
+    'Content-Type': 'text/plain; charset=utf-8',
+  });
+  res.end('Authentication required');
+  return false;
+}
+
+function proxyNoVncHttp(req, res, url) {
+  if (!checkOptionalBasicAuth(req, res)) return;
+
+  if (url.pathname === '/auth' || url.pathname === '/auth/') {
+    res.writeHead(302, {
+      Location: '/auth/vnc.html?autoconnect=1&resize=scale&path=auth/websockify',
+    });
+    res.end();
+    return;
+  }
+
+  const upstreamPath = (url.pathname.slice('/auth'.length) || '/') + url.search;
+  const proxyReq = http.request(
+    {
+      hostname: SCRAPER_NOVNC_HOST,
+      port: SCRAPER_NOVNC_PORT,
+      path: upstreamPath,
+      method: req.method,
+      headers: {
+        ...req.headers,
+        host: `${SCRAPER_NOVNC_HOST}:${SCRAPER_NOVNC_PORT}`,
+      },
+    },
+    (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+      proxyRes.pipe(res);
+    }
+  );
+
+  proxyReq.on('error', () => {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+    }
+    res.end('Sign-in service is currently unavailable. Please try again in a moment.');
+  });
+
+  req.pipe(proxyReq);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -158,9 +218,28 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Remote browser login UI (proxied to eagles-scrapper noVNC)
+  if (url.pathname === '/auth' || url.pathname.startsWith('/auth/')) {
+    return proxyNoVncHttp(req, res, url);
+  }
+
   // Scraper control status
   if (req.method === 'GET' && url.pathname === '/api/scraper') {
     return sendJson(res, 200, scraperControl.getStatus());
+  }
+
+  // Report scraper Google authentication status
+  if (req.method === 'POST' && url.pathname === '/api/scraper/status') {
+    if (API_KEY && req.headers['x-api-key'] !== API_KEY) {
+      return sendJson(res, 401, { error: 'Unauthorized: invalid X-API-Key' });
+    }
+    try {
+      const body = await readJsonBody(req);
+      const auth = scraperControl.setAuthStatus(body);
+      return sendJson(res, 200, { ok: true, auth });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
   }
 
   // Register configured devices reported by eagles-scrapper
@@ -251,6 +330,53 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(405);
   res.end('Method Not Allowed');
+});
+
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  if (!url.pathname.startsWith('/auth/')) {
+    socket.destroy();
+    return;
+  }
+
+  if (AUTH_PASSWORD) {
+    const authHeader = req.headers.authorization || '';
+    let ok = false;
+    if (authHeader.startsWith('Basic ')) {
+      const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8');
+      const sep = decoded.indexOf(':');
+      const pass = sep >= 0 ? decoded.slice(sep + 1) : decoded;
+      ok = pass === AUTH_PASSWORD;
+    }
+    if (!ok) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Eagles Auth"\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+  }
+
+  const upstreamPath = (url.pathname.slice('/auth'.length) || '/') + url.search;
+  const upstream = net.connect(SCRAPER_NOVNC_PORT, SCRAPER_NOVNC_HOST, () => {
+    const headerLines = [`${req.method} ${upstreamPath} HTTP/${req.httpVersion}`];
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      const name = req.rawHeaders[i];
+      const value = req.rawHeaders[i + 1];
+      if (name.toLowerCase() === 'host') {
+        headerLines.push(`Host: ${SCRAPER_NOVNC_HOST}:${SCRAPER_NOVNC_PORT}`);
+      } else {
+        headerLines.push(`${name}: ${value}`);
+      }
+    }
+    upstream.write(`${headerLines.join('\r\n')}\r\n\r\n`);
+    if (head && head.length > 0) {
+      upstream.write(head);
+    }
+    upstream.pipe(socket);
+    socket.pipe(upstream);
+  });
+
+  upstream.on('error', () => socket.destroy());
+  socket.on('error', () => upstream.destroy());
 });
 
 server.listen(PORT, HOST, () => {

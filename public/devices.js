@@ -1,4 +1,5 @@
 const statusBadgeEl = document.getElementById('status-badge');
+const authWarningEl = document.getElementById('auth-warning');
 const alertBoxEl = document.getElementById('alert-box');
 const statusSummaryEl = document.getElementById('status-summary');
 const statusSubEl = document.getElementById('status-sub');
@@ -10,6 +11,7 @@ let state = {
   active: false,
   devices: [],
   knownDevices: [],
+  auth: { authenticated: null, reason: null },
   scraperConnected: false,
 };
 let busy = false;
@@ -56,7 +58,13 @@ function getActiveDeviceIds() {
 }
 
 function render() {
-  if (state.scraperConnected) {
+  const authBroken = state.scraperConnected && state.auth && state.auth.authenticated === false;
+  authWarningEl.classList.toggle('hidden', !authBroken);
+
+  if (authBroken) {
+    statusBadgeEl.textContent = 'Sign-in Needed';
+    statusBadgeEl.className = 'badge badge-connecting';
+  } else if (state.scraperConnected) {
     statusBadgeEl.textContent = 'Online';
     statusBadgeEl.className = 'badge badge-live';
   } else {

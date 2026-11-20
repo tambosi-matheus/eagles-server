@@ -50,7 +50,24 @@ export class ScraperController {
       updatedAt: null,
     };
     this.knownDevices = [];
+    this.auth = {
+      authenticated: null, // null = unknown/not yet reported, true = signed in, false = needs login
+      reason: null,
+      updatedAt: null,
+    };
     this.listeners = new Set();
+  }
+
+  setAuthStatus({ authenticated, reason = null } = {}) {
+    if (typeof authenticated !== 'boolean') {
+      throw new Error('Invalid auth status: boolean "authenticated" is required.');
+    }
+    this.auth = {
+      authenticated,
+      reason: authenticated ? null : reason ? String(reason) : 'Google sign-in required',
+      updatedAt: Date.now(),
+    };
+    return this.auth;
   }
 
   setKnownDevices(devices) {
@@ -89,6 +106,7 @@ export class ScraperController {
       active: this.state.active,
       devices: this.state.devices,
       knownDevices: this.knownDevices,
+      auth: this.auth,
       scraperConnected: this.listeners.size > 0,
       connectedScrapers: this.listeners.size,
       updatedAt: this.state.updatedAt,

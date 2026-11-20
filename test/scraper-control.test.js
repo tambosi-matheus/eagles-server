@@ -15,10 +15,22 @@ test('ScraperController starts idle and broadcasts start/stop commands with devi
     active: false,
     devices: [],
     knownDevices: [],
+    auth: {
+      authenticated: null,
+      reason: null,
+      updatedAt: null,
+    },
     scraperConnected: false,
     connectedScrapers: 0,
     updatedAt: null,
   });
+
+  ctrl.setAuthStatus({ authenticated: false, reason: 'Google sign-in required' });
+  assert.equal(ctrl.getStatus().auth.authenticated, false);
+  assert.equal(ctrl.getStatus().auth.reason, 'Google sign-in required');
+  ctrl.setAuthStatus({ authenticated: true });
+  assert.equal(ctrl.getStatus().auth.authenticated, true);
+  assert.equal(ctrl.getStatus().auth.reason, null);
 
   ctrl.setKnownDevices([
     { runnerId: 'poco-f5', deviceName: 'POCO F5', name: 'Matheus', bib: '101', color: '#38bdf8' },
