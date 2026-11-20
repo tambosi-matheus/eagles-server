@@ -48,17 +48,18 @@ function normalizePointsFromJson(parsed) {
 }
 
 export class MapManager {
-  constructor({ mapsDir, defaultRouteFile }) {
+  constructor({ mapsDir, defaultRouteFile, seedRouteFiles = [] }) {
     this.mapsDir = mapsDir;
     this.registryFile = mapsDir ? path.join(mapsDir, 'registry.json') : null;
     this.maps = new Map(); // id -> full map object with route model
     this.primaryMapId = null;
     this.deviceMaps = new Map(); // runnerId -> mapId
 
-    this._loadOrSeed(defaultRouteFile);
+    this._loadOrSeed(defaultRouteFile, seedRouteFiles);
   }
 
-  _loadOrSeed(defaultRouteFile) {
+  _loadOrSeed(defaultRouteFile, seedRouteFiles = []) {
+    let changed = false;
     if (this.registryFile && fs.existsSync(this.registryFile)) {
       try {
         const raw = JSON.parse(fs.readFileSync(this.registryFile, 'utf8'));
@@ -93,6 +94,48 @@ export class MapManager {
       }
     }
 
+    // Seed any built-in official race maps that aren't already in the registry
+    let seededOfficial = false;
+    for (const filePath of seedRouteFiles) {
+      if (!filePath || !fs.existsSync(filePath)) continue;
+      try {
+        const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const id = raw.id || slugify(raw.name || path.basename(filePath, '.json'));
+        if (this.maps.has(id)) continue;
+        const model = buildRouteModel({
+          name: raw.name,
+          city: raw.city || '',
+          points: raw.points,
+        });
+        const totalKm = (model.totalMeters / 1000).toFixed(1);
+        this.maps.set(id, {
+          id,
+          name: model.name,
+          distanceLabel: raw.distanceLabel || `${totalKm}k`,
+          city: model.city,
+          color: raw.color || MAP_COLORS[this.maps.size % MAP_COLORS.length],
+          open: raw.open !== false,
+          createdAt: new Date().toISOString(),
+          ...model,
+        });
+        seededOfficial = true;
+        changed = true;
+      } catch (err) {
+        log.warn('_seed', 'Could not seed official map', { filePath, error: err.message });
+      }
+    }
+
+    // Switch default to 42k when official Curitiba maps are seeded over the sample loop
+    if (seededOfficial && (!this.primaryMapId || this.primaryMapId === 'default-route')) {
+      if (this.maps.has('curitiba-42k')) {
+        this.primaryMapId = 'curitiba-42k';
+        if (this.maps.has('default-route')) {
+          this.maps.get('default-route').open = false;
+        }
+        changed = true;
+      }
+    }
+
     if (this.maps.size === 0 && defaultRouteFile) {
       const seeded = loadRoute(defaultRouteFile);
       const id = 'default-route';
@@ -108,7 +151,7 @@ export class MapManager {
         ...seeded,
       });
       this.primaryMapId = id;
-      this._save();
+      changed = true;
     }
 
     if (!this.primaryMapId || !this.maps.has(this.primaryMapId)) {
@@ -116,7 +159,12 @@ export class MapManager {
       if (first) {
         this.primaryMapId = first.id;
         first.open = true;
+        changed = true;
       }
+    }
+
+    if (changed) {
+      this._save();
     }
   }
 

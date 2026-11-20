@@ -72,7 +72,18 @@ const MIME_TYPES = {
   '.png': 'image/png',
 };
 
-const mapManager = new MapManager({ mapsDir: MAPS_DIR, defaultRouteFile: ROUTE_FILE });
+const SEED_ROUTE_FILES = [
+  path.resolve(__dirname, '../data/maratona-curitiba-5k.json'),
+  path.resolve(__dirname, '../data/maratona-curitiba-10k.json'),
+  path.resolve(__dirname, '../data/maratona-curitiba-21k.json'),
+  path.resolve(__dirname, '../data/maratona-curitiba-42k.json'),
+];
+
+const mapManager = new MapManager({
+  mapsDir: MAPS_DIR,
+  defaultRouteFile: ROUTE_FILE,
+  seedRouteFiles: SEED_ROUTE_FILES,
+});
 const store = new RunnerStore(mapManager);
 const scraperControl = new ScraperController();
 const passkeys = new PasskeyManager({
