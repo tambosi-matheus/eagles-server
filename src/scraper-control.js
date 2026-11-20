@@ -95,6 +95,46 @@ export class ScraperController {
     };
   }
 
+  getActiveDevices() {
+    if (!this.state.active) return [];
+    if (this.state.devices === null) {
+      return [...this.knownDevices];
+    }
+    if (!Array.isArray(this.state.devices)) return [];
+
+    const result = [];
+    const seen = new Set();
+
+    for (const id of this.state.devices) {
+      const needle = String(id || '').trim().toLowerCase();
+      if (!needle) continue;
+      const matches = this.knownDevices.filter((d) =>
+        [d.runnerId, d.deviceName, d.name].some(
+          (field) => typeof field === 'string' && field.trim().toLowerCase() === needle
+        )
+      );
+      if (matches.length > 0) {
+        for (const m of matches) {
+          if (!seen.has(m.runnerId)) {
+            seen.add(m.runnerId);
+            result.push(m);
+          }
+        }
+      } else if (!seen.has(id)) {
+        seen.add(id);
+        result.push({
+          runnerId: id,
+          deviceName: id,
+          name: id,
+          bib: '',
+          color: '#38bdf8',
+        });
+      }
+    }
+
+    return result;
+  }
+
   handleCommand({ action, devices } = {}) {
     const normalizedAction = typeof action === 'string' ? action.trim().toLowerCase() : '';
     if (normalizedAction !== 'start' && normalizedAction !== 'stop') {

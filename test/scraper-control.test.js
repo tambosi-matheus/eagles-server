@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ScraperController } from '../src/scraper-control.js';
+import { loadRoute, pointAtDistance } from '../src/gpx-matcher.js';
+import { RunnerStore } from '../src/store.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 test('ScraperController starts idle and broadcasts start/stop commands with device selection', () => {
   const ctrl = new ScraperController();
@@ -79,4 +86,40 @@ test('ScraperController supports "all" / omitted devices and validates invalid i
 
   // Invalid action is rejected
   assert.throws(() => ctrl.handleCommand({ action: 'pause' }), /Invalid action/);
+});
+
+test('RunnerStore shows active devices before first ping and updates once ping arrives', () => {
+  const route = loadRoute(path.resolve(__dirname, '../data/curitiba-route.json'));
+  const store = new RunnerStore(route);
+  const ctrl = new ScraperController();
+
+  ctrl.setKnownDevices([
+    { runnerId: 'poco-f5', deviceName: 'POCO F5', name: 'Matheus', bib: '101', color: '#38bdf8' },
+  ]);
+  ctrl.handleCommand({ action: 'start', devices: ['poco-f5'] });
+  store.syncActiveDevices(ctrl.getActiveDevices());
+
+  let snap = store.getSnapshot();
+  assert.equal(snap.runners.length, 1);
+  assert.equal(snap.runners[0].runnerId, 'poco-f5');
+  assert.equal(snap.runners[0].hasLocation, false);
+  assert.equal(snap.runners[0].distanceKm, null);
+
+  // Deactivating before any ping removes the waiting entry
+  ctrl.handleCommand({ action: 'stop' });
+  store.syncActiveDevices(ctrl.getActiveDevices());
+  assert.equal(store.getSnapshot().runners.length, 0);
+
+  // Reactivate, then receive a ping
+  ctrl.handleCommand({ action: 'start', devices: ['poco-f5'] });
+  store.syncActiveDevices(ctrl.getActiveDevices());
+  const pt = pointAtDistance(route, 1500);
+  store.ingestPing({ runnerId: 'poco-f5', lat: pt.lat, lon: pt.lon, timestamp: 1_700_000_000_000 });
+
+  snap = store.getSnapshot(1_700_000_000_000);
+  assert.equal(snap.runners.length, 1);
+  assert.equal(snap.runners[0].hasLocation, true);
+  assert.equal(snap.runners[0].name, 'Matheus');
+  assert.equal(snap.runners[0].bib, '101');
+  assert.ok(snap.runners[0].distanceKm >= 1.4 && snap.runners[0].distanceKm <= 1.6);
 });

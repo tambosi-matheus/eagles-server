@@ -27,6 +27,59 @@ export class RunnerStore {
   }
 
   /**
+   * Ensure all currently active devices appear in the runner list even before
+   * their first location ping arrives, and remove waiting-only entries when deactivated.
+   */
+  syncActiveDevices(activeDevices = []) {
+    const activeIds = new Set();
+    let changed = false;
+
+    for (const device of activeDevices) {
+      if (!device || !device.runnerId) continue;
+      const runnerId = String(device.runnerId).trim();
+      if (!runnerId) continue;
+      activeIds.add(runnerId);
+
+      const existing = this.runners.get(runnerId);
+      if (!existing) {
+        const assignedColor =
+          device.color || DEFAULT_COLORS[this.runners.size % DEFAULT_COLORS.length];
+        this.runners.set(runnerId, {
+          runnerId,
+          name: device.name || device.deviceName || runnerId,
+          bib: device.bib || '',
+          color: assignedColor,
+          hasLocation: false,
+          source: null,
+          rawLat: null,
+          rawLon: null,
+          accuracyMeters: null,
+          snappedLat: null,
+          snappedLon: null,
+          distanceMeters: 0,
+          crossTrackMeters: null,
+          onCourse: false,
+          speedMps: null,
+          lastPingAt: null,
+          history: [],
+        });
+        changed = true;
+      }
+    }
+
+    for (const [runnerId, record] of this.runners.entries()) {
+      if (record.hasLocation === false && !activeIds.has(runnerId)) {
+        this.runners.delete(runnerId);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.broadcast('snapshot', this.getSnapshot());
+    }
+  }
+
+  /**
    * Ingest a location update from the Google Find Hub scraper, Android phone, or simulator.
    */
   ingestPing(ping) {
@@ -54,7 +107,9 @@ export class RunnerStore {
       color || existing?.color || DEFAULT_COLORS[this.runners.size % DEFAULT_COLORS.length];
 
     const elapsedSec =
-      existing && pingMs > existing.lastPingAt ? (pingMs - existing.lastPingAt) / 1000 : null;
+      existing && existing.lastPingAt != null && pingMs > existing.lastPingAt
+        ? (pingMs - existing.lastPingAt) / 1000
+        : null;
 
     const snapped = snapToRoute(this.route, lat, lon, {
       lastDistanceMeters: existing?.onCourse ? existing.distanceMeters : null,
@@ -81,6 +136,7 @@ export class RunnerStore {
       name: name || existing?.name || runnerId,
       bib: bib || existing?.bib || '',
       color: assignedColor,
+      hasLocation: true,
       source,
       rawLat: lat,
       rawLon: lon,
@@ -131,6 +187,35 @@ export class RunnerStore {
   }
 
   _toPublicView(record, nowMs) {
+    if (record.hasLocation === false) {
+      return {
+        runnerId: record.runnerId,
+        name: record.name,
+        bib: record.bib,
+        color: record.color,
+        hasLocation: false,
+        source: null,
+        rawLat: null,
+        rawLon: null,
+        accuracyMeters: null,
+        snappedLat: null,
+        snappedLon: null,
+        displayLat: null,
+        displayLon: null,
+        interpolated: false,
+        onCourse: false,
+        crossTrackMeters: null,
+        distanceKm: null,
+        lastVerifiedKm: null,
+        progressPct: 0,
+        speedMps: null,
+        paceSecPerKm: null,
+        etaSeconds: null,
+        lastPingAt: null,
+        ageSeconds: null,
+      };
+    }
+
     const ageSeconds = Math.max(0, (nowMs - record.lastPingAt) / 1000);
     let estimatedDistanceMeters = record.distanceMeters;
     let displayLat = record.onCourse ? record.snappedLat : record.rawLat;
@@ -164,6 +249,7 @@ export class RunnerStore {
       name: record.name,
       bib: record.bib,
       color: record.color,
+      hasLocation: true,
       source: record.source,
       rawLat: record.rawLat,
       rawLon: record.rawLon,
@@ -193,7 +279,13 @@ export class RunnerStore {
     for (const record of this.runners.values()) {
       runners.push(this._toPublicView(record, nowMs));
     }
-    runners.sort((a, b) => b.distanceKm - a.distanceKm);
+    runners.sort((a, b) => {
+      const aHas = a.hasLocation !== false;
+      const bHas = b.hasLocation !== false;
+      if (aHas !== bHas) return aHas ? -1 : 1;
+      if (aHas && bHas) return b.distanceKm - a.distanceKm;
+      return a.name.localeCompare(b.name);
+    });
     return {
       serverTime: nowMs,
       route: {

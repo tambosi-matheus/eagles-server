@@ -78,8 +78,36 @@ function initials(name) {
     .join('');
 }
 
+function hasValidLocation(runner) {
+  return (
+    runner &&
+    runner.hasLocation !== false &&
+    Number.isFinite(runner.displayLat) &&
+    Number.isFinite(runner.displayLon)
+  );
+}
+
+function removeRunner(runnerId) {
+  runnersById.delete(runnerId);
+  if (markers.has(runnerId)) {
+    markers.get(runnerId).remove();
+    markers.delete(runnerId);
+  }
+  if (rawMarkers.has(runnerId)) {
+    rawMarkers.get(runnerId).remove();
+    rawMarkers.delete(runnerId);
+  }
+  if (selectedRunnerId === runnerId) {
+    selectedRunnerId = null;
+  }
+}
+
 function upsertRunner(runner) {
   runnersById.set(runner.runnerId, runner);
+
+  if (!hasValidLocation(runner)) {
+    return;
+  }
 
   const pos = [runner.displayLat, runner.displayLon];
   const label = `${runner.name} · ${runner.distanceKm.toFixed(1)}k`;
@@ -101,19 +129,21 @@ function upsertRunner(runner) {
   }
 
   // Raw GPS marker (helpful for seeing how noisy Google Find Hub / tag pings are vs snapped)
-  const rawPos = [runner.rawLat, runner.rawLon];
-  if (rawMarkers.has(runner.runnerId)) {
-    rawMarkers.get(runner.runnerId).setLatLng(rawPos);
-  } else {
-    const rawM = L.circleMarker(rawPos, {
-      radius: 5,
-      color: '#ffffff',
-      weight: 1.5,
-      fillColor: runner.color,
-      fillOpacity: 0.65,
-    });
-    if (showRawGps) rawM.addTo(map);
-    rawMarkers.set(runner.runnerId, rawM);
+  if (Number.isFinite(runner.rawLat) && Number.isFinite(runner.rawLon)) {
+    const rawPos = [runner.rawLat, runner.rawLon];
+    if (rawMarkers.has(runner.runnerId)) {
+      rawMarkers.get(runner.runnerId).setLatLng(rawPos);
+    } else {
+      const rawM = L.circleMarker(rawPos, {
+        radius: 5,
+        color: '#ffffff',
+        weight: 1.5,
+        fillColor: runner.color,
+        fillOpacity: 0.65,
+      });
+      if (showRawGps) rawM.addTo(map);
+      rawMarkers.set(runner.runnerId, rawM);
+    }
   }
 
   if (selectedRunnerId === runner.runnerId) {
@@ -121,17 +151,36 @@ function upsertRunner(runner) {
   }
 }
 
+function applySnapshot(runners) {
+  const incomingIds = new Set(runners.map((r) => r.runnerId));
+  for (const existingId of Array.from(runnersById.keys())) {
+    if (!incomingIds.has(existingId)) {
+      removeRunner(existingId);
+    }
+  }
+  for (const r of runners) {
+    upsertRunner(r);
+  }
+  renderRunnerList();
+}
+
 function focusRunner(runnerId) {
   selectedRunnerId = runnerId;
   const r = runnersById.get(runnerId);
-  if (r) {
+  if (hasValidLocation(r)) {
     map.setView([r.displayLat, r.displayLon], 15, { animate: true });
   }
   renderRunnerList();
 }
 
 function renderRunnerList() {
-  const list = Array.from(runnersById.values()).sort((a, b) => b.distanceKm - a.distanceKm);
+  const list = Array.from(runnersById.values()).sort((a, b) => {
+    const aHas = hasValidLocation(a);
+    const bHas = hasValidLocation(b);
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    if (aHas && bHas) return b.distanceKm - a.distanceKm;
+    return a.name.localeCompare(b.name);
+  });
   runnerCountEl.textContent = String(list.length);
 
   if (list.length === 0) {
@@ -146,8 +195,14 @@ function renderRunnerList() {
   runnerListEl.innerHTML = list
     .map((r) => {
       const selectedClass = r.runnerId === selectedRunnerId ? 'selected' : '';
+      const hasLoc = hasValidLocation(r);
       const modeTag = r.interpolated ? 'estimated' : 'live';
       const eta = formatEta(r.etaSeconds);
+      const metaText = hasLoc
+        ? `Updated ${formatAge(r.ageSeconds)} · ${modeTag}${eta ? ` · ${eta}` : ''}`
+        : 'Waiting for location…';
+      const distanceText = hasLoc ? `${r.distanceKm.toFixed(2)} km` : '-- km';
+      const paceText = hasLoc ? formatPace(r.paceSecPerKm) : 'Locating…';
       return `
         <div class="runner-card ${selectedClass}" data-id="${r.runnerId}">
           <div class="runner-dot" style="background:${r.color}">${initials(r.name)}</div>
@@ -156,13 +211,11 @@ function renderRunnerList() {
               <span>${r.name}</span>
               ${r.bib ? `<span class="runner-bib">#${r.bib}</span>` : ''}
             </div>
-            <div class="runner-meta">
-              Updated ${formatAge(r.ageSeconds)} · ${modeTag}${eta ? ` · ${eta}` : ''}
-            </div>
+            <div class="runner-meta">${metaText}</div>
           </div>
           <div class="runner-stats">
-            <div class="runner-km">${r.distanceKm.toFixed(2)} km</div>
-            <div class="runner-pace">${formatPace(r.paceSecPerKm)}</div>
+            <div class="runner-km">${distanceText}</div>
+            <div class="runner-pace">${paceText}</div>
           </div>
         </div>`;
     })
@@ -228,14 +281,12 @@ function connectStream() {
 
   es.addEventListener('snapshot', (ev) => {
     const data = JSON.parse(ev.data);
-    for (const r of data.runners) upsertRunner(r);
-    renderRunnerList();
+    applySnapshot(data.runners);
   });
 
   es.addEventListener('tick', (ev) => {
     const data = JSON.parse(ev.data);
-    for (const r of data.runners) upsertRunner(r);
-    renderRunnerList();
+    applySnapshot(data.runners);
   });
 
   es.addEventListener('runner_update', (ev) => {

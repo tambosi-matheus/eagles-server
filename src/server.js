@@ -172,6 +172,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const devices = Array.isArray(body) ? body : body.devices;
       const registered = scraperControl.setKnownDevices(devices);
+      store.syncActiveDevices(scraperControl.getActiveDevices());
       return sendJson(res, 200, { ok: true, count: registered.length, knownDevices: registered });
     } catch (err) {
       return sendJson(res, 400, { error: err.message });
@@ -190,6 +191,7 @@ const server = http.createServer(async (req, res) => {
             ? url.searchParams.get('devices')
             : undefined;
       const result = scraperControl.handleCommand({ action, devices });
+      store.syncActiveDevices(scraperControl.getActiveDevices());
       return sendJson(res, 200, result);
     } catch (err) {
       return sendJson(res, 400, { error: err.message });
