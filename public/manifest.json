@@ -1,6 +1,6 @@
 {
-  "name": "Friends Marathon Tracker",
-  "short_name": "RunTracker",
+  "name": "Eagles Run Club Tracker",
+  "short_name": "EaglesRun",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",

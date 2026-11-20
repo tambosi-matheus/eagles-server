@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadRoute } from './gpx-matcher.js';
 import { RunnerStore } from './store.js';
+import { ScraperController } from './scraper-control.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,7 @@ const MIME_TYPES = {
 
 const route = loadRoute(ROUTE_FILE);
 const store = new RunnerStore(route);
+const scraperControl = new ScraperController();
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
@@ -60,7 +62,12 @@ function readJsonBody(req) {
 }
 
 function serveStatic(reqPath, res) {
-  const safePath = reqPath === '/' ? '/index.html' : reqPath;
+  let safePath = reqPath;
+  if (safePath === '/') {
+    safePath = '/index.html';
+  } else if (safePath === '/devices' || safePath === '/devices/') {
+    safePath = '/devices.html';
+  }
   const fullPath = path.resolve(PUBLIC_DIR, `.${safePath}`);
   if (!fullPath.startsWith(PUBLIC_DIR)) {
     res.writeHead(403);
@@ -103,6 +110,7 @@ const server = http.createServer(async (req, res) => {
       route: route.name,
       totalKm: Number((route.totalMeters / 1000).toFixed(2)),
       runnerCount: store.runners.size,
+      scraper: scraperControl.getStatus(),
     });
   }
 
@@ -142,6 +150,81 @@ const server = http.createServer(async (req, res) => {
     const heartbeat = setInterval(() => {
       res.write(`event: tick\ndata: ${JSON.stringify(store.getSnapshot())}\n\n`);
     }, 3000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
+    return;
+  }
+
+  // Scraper control status
+  if (req.method === 'GET' && url.pathname === '/api/scraper') {
+    return sendJson(res, 200, {
+      ...scraperControl.getStatus(),
+      authRequired: Boolean(API_KEY),
+    });
+  }
+
+  // Register configured devices reported by eagles-scrapper
+  if (req.method === 'POST' && url.pathname === '/api/scraper/devices') {
+    if (API_KEY && req.headers['x-api-key'] !== API_KEY) {
+      return sendJson(res, 401, { error: 'Unauthorized: invalid X-API-Key' });
+    }
+    try {
+      const body = await readJsonBody(req);
+      const devices = Array.isArray(body) ? body : body.devices;
+      const registered = scraperControl.setKnownDevices(devices);
+      return sendJson(res, 200, { ok: true, count: registered.length, knownDevices: registered });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+
+  // Scraper start/stop command endpoint (single endpoint for start & stop + device selection)
+  if (req.method === 'POST' && url.pathname === '/api/scraper') {
+    if (API_KEY && req.headers['x-api-key'] !== API_KEY) {
+      return sendJson(res, 401, { error: 'Unauthorized: invalid X-API-Key' });
+    }
+    try {
+      const body = await readJsonBody(req);
+      const action = body.action ?? url.searchParams.get('action') ?? undefined;
+      const devices =
+        body.devices !== undefined
+          ? body.devices
+          : url.searchParams.has('devices')
+            ? url.searchParams.get('devices')
+            : undefined;
+      const result = scraperControl.handleCommand({ action, devices });
+      return sendJson(res, 200, result);
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+
+  // Live SSE command stream consumed by eagles-scrapper
+  if (req.method === 'GET' && url.pathname === '/api/scraper/events') {
+    if (API_KEY && req.headers['x-api-key'] !== API_KEY) {
+      return sendJson(res, 401, { error: 'Unauthorized: invalid X-API-Key' });
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+
+    const unsubscribe = scraperControl.subscribe((event, payload) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+    });
+
+    // Send current state immediately so reconnecting scrapers sync up
+    res.write(`event: state\ndata: ${JSON.stringify(scraperControl.getStatus())}\n\n`);
+
+    const heartbeat = setInterval(() => {
+      res.write(': keepalive\n\n');
+    }, 25000);
 
     req.on('close', () => {
       clearInterval(heartbeat);

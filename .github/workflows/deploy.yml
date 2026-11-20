@@ -51,6 +51,7 @@ jobs:
             if [ -n "${INGEST_API_KEY}" ]; then
               printf 'INGEST_API_KEY=%s\n' "${INGEST_API_KEY}" > .env
             fi
+            docker network inspect boomhut_ingress >/dev/null 2>&1 || docker network create boomhut_ingress
             docker compose up -d --build
             docker compose ps
           EOF

@@ -13,8 +13,8 @@ services:
     expose:
       - "3000"
     networks:
-      - music-dash-server_ingress
+      - boomhut_ingress
 
 networks:
-  music-dash-server_ingress:
+  boomhut_ingress:
     external: true

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f172a" />
+    <link rel="manifest" href="/manifest.json" />
+    <title>Devices · Eagles Run Club</title>
+    <link rel="stylesheet" href="/devices.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-title">
+        <span>Devices</span>
+        <span id="scraper-badge" class="badge badge-connecting">Checking…</span>
+      </div>
+      <div class="topbar-actions">
+        <a href="/" class="icon-btn">Map</a>
+      </div>
+    </header>
+
+    <main class="container">
+      <section id="auth-card" class="card auth-card hidden">
+        <label class="auth-label" for="api-key-input">API Key</label>
+        <div class="auth-row">
+          <input
+            id="api-key-input"
+            type="password"
+            placeholder="Enter X-API-Key"
+            autocomplete="off"
+          />
+          <button id="btn-save-key" class="btn btn-secondary" type="button">Save</button>
+        </div>
+      </section>
+
+      <div id="alert-box" class="alert hidden" role="alert"></div>
+
+      <section class="summary-bar">
+        <div class="summary-text">
+          <strong id="status-summary">Idle</strong>
+          <span id="status-sub" class="muted">No devices active</span>
+        </div>
+        <div class="summary-actions">
+          <button id="btn-start-all" class="btn btn-primary" type="button" disabled>
+            Start All
+          </button>
+          <button id="btn-stop-all" class="btn btn-danger" type="button" disabled>
+            Stop All
+          </button>
+        </div>
+      </section>
+
+      <section id="device-list" class="device-list">
+        <div class="empty-state">Loading devices…</div>
+      </section>
+    </main>
+
+    <script src="/devices.js"></script>
+  </body>
+</html>
