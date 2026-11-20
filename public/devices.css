@@ -313,6 +313,36 @@ body {
   text-overflow: ellipsis;
 }
 
+.device-rate-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.interval-select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.interval-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.interval-select:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 /* Toggle switch */
 .switch {
   position: relative;

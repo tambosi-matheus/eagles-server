@@ -58,6 +58,49 @@ function getActiveDeviceIds() {
   return state.knownDevices.filter((d) => isDeviceActive(d)).map((d) => d.runnerId);
 }
 
+const INTERVAL_OPTIONS = [
+  { value: 15, label: '15 sec' },
+  { value: 30, label: '30 sec' },
+  { value: 60, label: '1 min' },
+  { value: 120, label: '2 min' },
+  { value: 300, label: '5 min' },
+];
+
+function formatIntervalLabel(seconds) {
+  if (seconds < 60) return `${seconds} sec`;
+  if (seconds % 60 === 0) {
+    const mins = seconds / 60;
+    return `${mins} min`;
+  }
+  return `${seconds} sec`;
+}
+
+function renderIntervalSelect(device) {
+  const current = Number(device.pollIntervalSeconds) || 30;
+  const options = [...INTERVAL_OPTIONS];
+  if (!options.some((o) => o.value === current)) {
+    options.push({ value: current, label: formatIntervalLabel(current) });
+    options.sort((a, b) => a.value - b.value);
+  }
+  return `
+    <label class="device-rate-row">
+      <span>Update every</span>
+      <select
+        class="interval-select"
+        data-interval-id="${escapeHtml(device.runnerId)}"
+        aria-label="Update rate for ${escapeHtml(device.name)}"
+        ${busy ? 'disabled' : ''}
+      >
+        ${options
+          .map(
+            (opt) =>
+              `<option value="${opt.value}" ${opt.value === current ? 'selected' : ''}>${escapeHtml(opt.label)}</option>`
+          )
+          .join('')}
+      </select>
+    </label>`;
+}
+
 function render() {
   const authBroken = state.scraperConnected && state.auth && state.auth.authenticated === false;
   authWarningEl.classList.toggle('hidden', !authBroken);
@@ -142,6 +185,7 @@ function render() {
           <div class="device-info">
             ${titleBlock}
             <div class="device-meta">${escapeHtml(device.deviceName)}</div>
+            ${renderIntervalSelect(device)}
           </div>
           <label class="switch" aria-label="Toggle tracking for ${escapeHtml(device.name)}">
             <input
@@ -160,6 +204,14 @@ function render() {
     input.addEventListener('change', (ev) => {
       const runnerId = ev.target.dataset.runnerId;
       toggleDevice(runnerId, ev.target.checked);
+    });
+  }
+
+  for (const select of deviceListEl.querySelectorAll('.interval-select')) {
+    select.addEventListener('change', (ev) => {
+      const runnerId = ev.target.dataset.intervalId;
+      const intervalSeconds = Number(ev.target.value);
+      saveDeviceInterval(runnerId, intervalSeconds);
     });
   }
 
@@ -230,6 +282,33 @@ async function sendCommand(payload) {
     state = { ...state, ...data };
   } catch {
     showError('Could not update tracking. Please try again.');
+    await fetchStatus();
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
+async function saveDeviceInterval(runnerId, intervalSeconds) {
+  busy = true;
+  showError('');
+  render();
+
+  try {
+    const res = await fetch('/api/scraper/interval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runnerId, intervalSeconds }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error('interval_failed');
+    }
+    if (Array.isArray(data.knownDevices)) {
+      state = { ...state, knownDevices: data.knownDevices };
+    }
+  } catch {
+    showError('Could not update the refresh rate. Please try again.');
     await fetchStatus();
   } finally {
     busy = false;

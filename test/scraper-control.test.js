@@ -15,6 +15,7 @@ test('ScraperController starts idle and broadcasts start/stop commands with devi
     active: false,
     devices: [],
     knownDevices: [],
+    deviceIntervals: {},
     auth: {
       authenticated: null,
       reason: null,
@@ -146,4 +147,18 @@ test('RunnerStore shows active devices before first ping and updates once ping a
   ]);
   assert.equal(ctrl.getStatus().knownDevices[0].name, 'Matheus T.');
   assert.equal(ctrl.getDisplayName('poco-f5', 'Matheus'), 'Matheus T.');
+
+  // Per-device update interval broadcasts and persists across re-registration
+  const intervalEvents = [];
+  const unsub = ctrl.subscribe((event, payload) => intervalEvents.push({ event, payload }));
+  ctrl.setDeviceInterval('poco-f5', 15);
+  assert.equal(ctrl.getStatus().deviceIntervals['poco-f5'], 15);
+  assert.equal(ctrl.getStatus().knownDevices[0].pollIntervalSeconds, 15);
+  assert.equal(intervalEvents.length, 1);
+  assert.equal(intervalEvents[0].payload.deviceIntervals['poco-f5'], 15);
+  ctrl.setKnownDevices([
+    { runnerId: 'poco-f5', deviceName: 'POCO F5', name: 'Matheus', bib: '101', color: '#38bdf8', pollIntervalSeconds: 30 },
+  ]);
+  assert.equal(ctrl.getStatus().knownDevices[0].pollIntervalSeconds, 15);
+  unsub();
 });

@@ -51,6 +51,7 @@ export class ScraperController {
     };
     this.knownDevices = [];
     this.customNames = new Map();
+    this.deviceIntervals = new Map(); // runnerId -> pollIntervalSeconds
     this.auth = {
       authenticated: null, // null = unknown/not yet reported, true = signed in, false = needs login
       reason: null,
@@ -80,15 +81,66 @@ export class ScraperController {
       .map((d) => {
         const runnerId = String(d.runnerId || d.deviceName || d.name).trim();
         const defaultName = String(d.name || d.deviceName || d.runnerId).trim();
+        const defaultInterval =
+          Number.isFinite(Number(d.pollIntervalSeconds)) && Number(d.pollIntervalSeconds) >= 10
+            ? Math.round(Number(d.pollIntervalSeconds))
+            : 30;
+        const interval = this.deviceIntervals.get(runnerId) ?? defaultInterval;
         return {
           runnerId,
           deviceName: String(d.deviceName || d.runnerId || d.name).trim(),
           name: this.customNames.get(runnerId) || defaultName,
           bib: d.bib ? String(d.bib).trim() : '',
           color: typeof d.color === 'string' && d.color.trim() ? d.color.trim() : '#38bdf8',
+          pollIntervalSeconds: interval,
         };
       });
     return this.knownDevices;
+  }
+
+  getDeviceIntervalsObject() {
+    const out = {};
+    for (const device of this.knownDevices) {
+      if (Number.isFinite(device.pollIntervalSeconds)) {
+        out[device.runnerId] = device.pollIntervalSeconds;
+      }
+    }
+    for (const [runnerId, seconds] of this.deviceIntervals.entries()) {
+      out[runnerId] = seconds;
+    }
+    return out;
+  }
+
+  setDeviceInterval(runnerId, intervalSeconds) {
+    const id = String(runnerId || '').trim();
+    const secs = Math.round(Number(intervalSeconds));
+    if (!id) {
+      throw new Error('Device ID is required.');
+    }
+    if (!Number.isFinite(secs) || secs < 10 || secs > 3600) {
+      throw new Error('Update rate must be between 10 and 3600 seconds.');
+    }
+
+    this.deviceIntervals.set(id, secs);
+    for (const device of this.knownDevices) {
+      if (device.runnerId === id) {
+        device.pollIntervalSeconds = secs;
+      }
+    }
+
+    const deviceIntervals = this.getDeviceIntervalsObject();
+    this.broadcast('command', {
+      action: this.state.active ? 'start' : 'stop',
+      ...this.state,
+      deviceIntervals,
+    });
+
+    return {
+      runnerId: id,
+      intervalSeconds: secs,
+      deviceIntervals,
+      knownDevices: this.knownDevices,
+    };
   }
 
   getDisplayName(runnerId, fallbackName = '') {
@@ -143,6 +195,7 @@ export class ScraperController {
       active: this.state.active,
       devices: this.state.devices,
       knownDevices: this.knownDevices,
+      deviceIntervals: this.getDeviceIntervalsObject(),
       auth: this.auth,
       scraperConnected: this.listeners.size > 0,
       connectedScrapers: this.listeners.size,
@@ -215,6 +268,7 @@ export class ScraperController {
       const command = {
         action: 'start',
         ...this.state,
+        deviceIntervals: this.getDeviceIntervalsObject(),
       };
       this.broadcast('command', command);
 
@@ -272,6 +326,7 @@ export class ScraperController {
         this.broadcast('command', {
           action: 'start',
           ...this.state,
+          deviceIntervals: this.getDeviceIntervalsObject(),
         });
       }
 

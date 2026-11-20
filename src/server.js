@@ -270,6 +270,17 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // Set per-device location update rate (in seconds)
+  if (req.method === 'POST' && url.pathname === '/api/scraper/interval') {
+    try {
+      const body = await readJsonBody(req);
+      const updated = scraperControl.setDeviceInterval(body.runnerId, body.intervalSeconds);
+      return sendJson(res, 200, { ok: true, ...updated });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+
   // Scraper start/stop command endpoint (single endpoint for start & stop + device selection)
   if (req.method === 'POST' && url.pathname === '/api/scraper') {
     try {
